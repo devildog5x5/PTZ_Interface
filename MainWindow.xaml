@@ -1,0 +1,504 @@
+<Window x:Class="PTZCameraControl.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF"
+        Title="PTZ Camera Control" 
+        Height="850" Width="1350"
+        MinHeight="750" MinWidth="1200"
+        Background="{StaticResource BackgroundDarkBrush}"
+        WindowStartupLocation="CenterScreen"
+        Closing="Window_Closing">
+    
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- EPIC HEADER with Gradient                                   -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="0" CornerRadius="12" Padding="20,15" Margin="0,0,0,15">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                    <GradientStop Color="#00BFFF" Offset="0"/>
+                    <GradientStop Color="#FF6600" Offset="0.5"/>
+                    <GradientStop Color="#FF1744" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="20" ShadowDepth="0" Direction="0" 
+                                  Color="#FF6600" Opacity="0.4"/>
+            </Border.Effect>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="🎥" FontSize="32" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="PTZ Camera Control" 
+                                   FontSize="26" FontWeight="Black" 
+                                   Foreground="White">
+                            <TextBlock.Effect>
+                                <DropShadowEffect BlurRadius="8" ShadowDepth="2" 
+                                                  Direction="315" Color="Black" Opacity="0.3"/>
+                            </TextBlock.Effect>
+                        </TextBlock>
+                        <TextBlock Text="Professional ONVIF PTZ Controller" 
+                                   FontSize="12" Foreground="#FFFFFFCC" FontWeight="SemiBold"/>
+                    </StackPanel>
+                </StackPanel>
+                
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="ConnectionIndicator" Width="12" Height="12" 
+                             Fill="#FF1744" Margin="0,0,8,0">
+                        <Ellipse.Effect>
+                            <DropShadowEffect BlurRadius="8" ShadowDepth="0" 
+                                              Direction="0" Color="#FF1744" Opacity="0.8"/>
+                        </Ellipse.Effect>
+                    </Ellipse>
+                    <TextBlock x:Name="ConnectionLabel" Text="OFFLINE" 
+                               FontSize="14" FontWeight="Bold" Foreground="White"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- MAIN CONTENT AREA                                           -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="300"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- LEFT PANEL - Connection Settings                        -->
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <Border Grid.Column="0" Background="{StaticResource SurfaceDarkBrush}" 
+                    CornerRadius="12" Padding="18" Margin="0,0,10,0"
+                    BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <!-- Section Header -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                            <Border Width="4" Height="20" CornerRadius="2" Margin="0,0,10,0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#00BFFF" Offset="0"/>
+                                        <GradientStop Color="#0088CC" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <TextBlock Text="CONNECTION" FontSize="14" FontWeight="Bold" 
+                                       Foreground="{StaticResource ElectricBlueBrush}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- IP Address -->
+                        <TextBlock Text="Camera IP Address" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <TextBox x:Name="HostTextBox" Style="{StaticResource ModernTextBox}"
+                                 Text="192.168.1.100" Margin="0,0,0,12"/>
+
+                        <!-- Port -->
+                        <TextBlock Text="ONVIF Port" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <TextBox x:Name="PortTextBox" Style="{StaticResource ModernTextBox}"
+                                 Text="80" Margin="0,0,0,12"/>
+
+                        <!-- Username -->
+                        <TextBlock Text="Username" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <TextBox x:Name="UsernameTextBox" Style="{StaticResource ModernTextBox}"
+                                 Text="admin" Margin="0,0,0,12"/>
+
+                        <!-- Password -->
+                        <TextBlock Text="Password" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <PasswordBox x:Name="PasswordBox" Style="{StaticResource ModernPasswordBox}"
+                                     Margin="0,0,0,18"/>
+
+                        <!-- Connect Button -->
+                        <Button x:Name="ConnectButton" Content="⚡ CONNECT" 
+                                Style="{StaticResource PrimaryButton}"
+                                Click="ConnectButton_Click"
+                                HorizontalAlignment="Stretch"/>
+
+                        <!-- Status Display -->
+                        <Border Background="{StaticResource BackgroundMediumBrush}" 
+                                CornerRadius="8" Padding="12,10" Margin="0,15,0,0"
+                                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                            <TextBlock x:Name="StatusText" Text="Ready to connect..." 
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="11" TextWrapping="Wrap"/>
+                        </Border>
+
+                        <!-- Stream Section Header -->
+                        <StackPanel Orientation="Horizontal" Margin="0,25,0,15">
+                            <Border Width="4" Height="20" CornerRadius="2" Margin="0,0,10,0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#FF6600" Offset="0"/>
+                                        <GradientStop Color="#CC5200" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <TextBlock Text="VIDEO STREAM" FontSize="14" FontWeight="Bold" 
+                                       Foreground="{StaticResource CompetitionOrangeBrush}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- Stream URL -->
+                        <TextBlock Text="RTSP Stream URL" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <TextBox x:Name="StreamUrlTextBox" Style="{StaticResource ModernTextBox}"
+                                 Text="" Margin="0,0,0,12"/>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="StartVideoButton" Content="▶ START" 
+                                    Style="{StaticResource OrangeButton}"
+                                    Click="StartVideoButton_Click"/>
+                            <Button x:Name="StopVideoButton" Grid.Column="2" Content="⬛ STOP" 
+                                    Style="{StaticResource RedButton}"
+                                    Click="StopVideoButton_Click" IsEnabled="False"/>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="AutoDetectButton" Content="🔍 AUTO DETECT" 
+                                    Style="{StaticResource ModernButton}"
+                                    Click="AutoDetectButton_Click"/>
+                            <Button x:Name="StopDetectButton" Grid.Column="2" Content="⬛" 
+                                    Style="{StaticResource ModernButton}"
+                                    Click="StopDetectButton_Click" Width="45" IsEnabled="False"/>
+                        </Grid>
+
+                        <!-- Speed Controls Header -->
+                        <StackPanel Orientation="Horizontal" Margin="0,25,0,15">
+                            <Border Width="4" Height="20" CornerRadius="2" Margin="0,0,10,0">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#FF1744" Offset="0"/>
+                                        <GradientStop Color="#D50032" Offset="1"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <TextBlock Text="SPEED SETTINGS" FontSize="14" FontWeight="Bold" 
+                                       Foreground="{StaticResource RacingRedBrush}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- Pan/Tilt Speed -->
+                        <TextBlock Text="Pan/Tilt Speed" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="45"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="PanTiltSpeedSlider" Minimum="0.1" Maximum="1.0" Value="0.5"
+                                    VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" 
+                                       Text="{Binding Value, ElementName=PanTiltSpeedSlider, StringFormat={}{0:F1}}"
+                                       Foreground="{StaticResource ElectricBlueBrush}"
+                                       FontWeight="Bold" HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <!-- Zoom Speed -->
+                        <TextBlock Text="Zoom Speed" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="45"/>
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="ZoomSpeedSlider" Minimum="0.1" Maximum="1.0" Value="0.5"
+                                    VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" 
+                                       Text="{Binding Value, ElementName=ZoomSpeedSlider, StringFormat={}{0:F1}}"
+                                       Foreground="{StaticResource CompetitionOrangeBrush}"
+                                       FontWeight="Bold" HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- CENTER PANEL - Video Display                            -->
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <Border Grid.Column="1" Background="{StaticResource SurfaceDarkBrush}" 
+                    CornerRadius="12" Padding="15" Margin="0"
+                    BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Video Header -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+                        <Border Width="4" Height="20" CornerRadius="2" Margin="0,0,10,0"
+                                Background="{StaticResource HeaderGradient}"/>
+                        <TextBlock Text="LIVE VIDEO FEED" FontSize="14" FontWeight="Bold" 
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- Video Container -->
+                    <Border Grid.Row="1" Background="#000000" CornerRadius="10" ClipToBounds="True"
+                            BorderThickness="2">
+                        <Border.BorderBrush>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#00BFFF" Offset="0"/>
+                                <GradientStop Color="#FF6600" Offset="0.5"/>
+                                <GradientStop Color="#FF1744" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.BorderBrush>
+                        <Grid>
+                            <!-- VLC Video View -->
+                            <vlc:VideoView x:Name="VideoView" Background="Black"/>
+                            
+                            <!-- No Video Overlay -->
+                            <Border x:Name="NoVideoOverlay" Background="#CC000000">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock Text="📹" FontSize="80" HorizontalAlignment="Center">
+                                        <TextBlock.Effect>
+                                            <DropShadowEffect BlurRadius="20" ShadowDepth="0" 
+                                                              Direction="0" Color="#00BFFF" Opacity="0.5"/>
+                                        </TextBlock.Effect>
+                                    </TextBlock>
+                                    <TextBlock Text="NO VIDEO STREAM" FontSize="20" FontWeight="Bold"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               HorizontalAlignment="Center" Margin="0,15,0,5"/>
+                                    <TextBlock Text="Connect to camera and start video" 
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               FontSize="13" HorizontalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <!-- RIGHT PANEL - PTZ Controls                              -->
+            <!-- ═══════════════════════════════════════════════════════ -->
+            <Border Grid.Column="2" Background="{StaticResource SurfaceDarkBrush}" 
+                    CornerRadius="12" Padding="18" Margin="10,0,0,0"
+                    BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <!-- PTZ Header -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                            <Border Width="4" Height="20" CornerRadius="2" Margin="0,0,10,0"
+                                    Background="{StaticResource HeaderGradient}"/>
+                            <TextBlock Text="PTZ CONTROLS" FontSize="14" FontWeight="Bold" 
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- Direction Pad -->
+                        <Border Background="{StaticResource CardDarkBrush}" 
+                                CornerRadius="12" Padding="15" Margin="0,0,0,15"
+                                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="PAN / TILT" FontSize="11" FontWeight="Bold"
+                                           Foreground="{StaticResource ElectricBlueBrush}"
+                                           HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                                <Grid HorizontalAlignment="Center">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="6"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="6"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="6"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="6"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button Grid.Row="0" Grid.Column="0" Content="↖" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="UpLeft_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+                                    <Button Grid.Row="0" Grid.Column="2" Content="▲" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="Up_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+                                    <Button Grid.Row="0" Grid.Column="4" Content="↗" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="UpRight_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+
+                                    <Button Grid.Row="2" Grid.Column="0" Content="◄" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="Left_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+                                    <Button Grid.Row="2" Grid.Column="2" Content="⌂" Style="{StaticResource PtzButton}"
+                                            Click="Home_Click" ToolTip="Go to Home Position"/>
+                                    <Button Grid.Row="2" Grid.Column="4" Content="►" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="Right_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+
+                                    <Button Grid.Row="4" Grid.Column="0" Content="↙" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="DownLeft_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+                                    <Button Grid.Row="4" Grid.Column="2" Content="▼" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="Down_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+                                    <Button Grid.Row="4" Grid.Column="4" Content="↘" Style="{StaticResource PtzButton}"
+                                            PreviewMouseDown="DownRight_MouseDown" PreviewMouseUp="Direction_MouseUp"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Zoom Controls -->
+                        <Border Background="{StaticResource CardDarkBrush}" 
+                                CornerRadius="12" Padding="15" Margin="0,0,0,15"
+                                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="ZOOM" FontSize="11" FontWeight="Bold"
+                                           Foreground="{StaticResource CompetitionOrangeBrush}"
+                                           HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <Button Content="−" Style="{StaticResource PtzButton}" FontSize="28"
+                                            PreviewMouseDown="ZoomOut_MouseDown" PreviewMouseUp="Zoom_MouseUp"
+                                            Margin="0,0,15,0"/>
+                                    <Button Content="+" Style="{StaticResource PtzButton}" FontSize="28"
+                                            PreviewMouseDown="ZoomIn_MouseDown" PreviewMouseUp="Zoom_MouseUp"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Absolute Position -->
+                        <Border Background="{StaticResource CardDarkBrush}" 
+                                CornerRadius="12" Padding="15" Margin="0,0,0,15"
+                                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="ABSOLUTE POSITION" FontSize="11" FontWeight="Bold"
+                                           Foreground="{StaticResource RacingRedBrush}"
+                                           HorizontalAlignment="Center" Margin="0,0,0,12"/>
+                                
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="45"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="35"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="8"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="8"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Pan:" 
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center" FontSize="11"/>
+                                    <Slider x:Name="PanSlider" Grid.Row="0" Grid.Column="1"
+                                            Minimum="-1" Maximum="1" Value="0" Margin="5,0"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="2"
+                                               Text="{Binding Value, ElementName=PanSlider, StringFormat={}{0:F1}}"
+                                               Foreground="{StaticResource ElectricBlueBrush}"
+                                               VerticalAlignment="Center" FontSize="10" FontWeight="Bold"/>
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Tilt:" 
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center" FontSize="11"/>
+                                    <Slider x:Name="TiltSlider" Grid.Row="2" Grid.Column="1"
+                                            Minimum="-1" Maximum="1" Value="0" Margin="5,0"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="2"
+                                               Text="{Binding Value, ElementName=TiltSlider, StringFormat={}{0:F1}}"
+                                               Foreground="{StaticResource CompetitionOrangeBrush}"
+                                               VerticalAlignment="Center" FontSize="10" FontWeight="Bold"/>
+
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Zoom:" 
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center" FontSize="11"/>
+                                    <Slider x:Name="ZoomSlider" Grid.Row="4" Grid.Column="1"
+                                            Minimum="0" Maximum="1" Value="0" Margin="5,0"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="2"
+                                               Text="{Binding Value, ElementName=ZoomSlider, StringFormat={}{0:F1}}"
+                                               Foreground="{StaticResource RacingRedBrush}"
+                                               VerticalAlignment="Center" FontSize="10" FontWeight="Bold"/>
+                                </Grid>
+
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="GO TO" Style="{StaticResource PrimaryButton}"
+                                            Click="GoToPosition_Click" Padding="10,8" FontSize="11"/>
+                                    <Button Grid.Column="2" Content="GET POS" Style="{StaticResource OrangeButton}"
+                                            Click="GetPosition_Click" Padding="10,8" FontSize="11"/>
+                                </Grid>
+                                <Button Content="SET HOME POSITION" Style="{StaticResource ModernButton}"
+                                        Click="SetHome_Click" Margin="0,8,0,0" FontSize="11"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Current Position Display -->
+                        <Border Background="{StaticResource BackgroundMediumBrush}" 
+                                CornerRadius="8" Padding="12"
+                                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="CURRENT POSITION" FontSize="10" FontWeight="Bold"
+                                           Foreground="{StaticResource TextMutedBrush}"
+                                           HorizontalAlignment="Center" Margin="0,0,0,5"/>
+                                <TextBlock x:Name="PositionText" Text="P:-- T:-- Z:--" 
+                                           Foreground="{StaticResource NeonCyanBrush}"
+                                           FontFamily="Consolas" FontSize="13" FontWeight="Bold"
+                                           HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- FOOTER                                                      -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="2" Background="{StaticResource SurfaceDarkBrush}" 
+                CornerRadius="8" Padding="15,12" Margin="0,15,0,0"
+                BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
+            <Grid>
+                <TextBlock Text="⚡ Hold direction buttons for continuous movement • Release to stop" 
+                           Foreground="{StaticResource TextMutedBrush}"
+                           FontSize="11" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock Text="ONVIF Profile S" 
+                               Foreground="{StaticResource ElectricBlueBrush}"
+                               FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Text=" • " Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="LibVLC" 
+                               Foreground="{StaticResource CompetitionOrangeBrush}"
+                               FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
+

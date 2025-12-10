@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PTZCameraControl</AssemblyName>
+    <RootNamespace>PTZCameraControl</RootNamespace>
+    <Version>1.0.0</Version>
+    <Authors>Robert Foster</Authors>
+    <Description>Professional ONVIF Profile S PTZ Camera Controller with Live Video</Description>
+    <Company>Video Scripts</Company>
+    <Product>PTZ Camera Control</Product>
+    <Copyright>Copyright © 2025 Robert Foster</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibVLCSharp.WPF" Version="3.8.5" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" />
+  </ItemGroup>
+
+</Project>
+

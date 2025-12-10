@@ -1,0 +1,53 @@
+# Build results
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio Code
+.vscode/
+
+# Rider
+.idea/
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# NuGet packages
+*.nupkg
+**/packages/*
+!**/packages/build/
+
+# Installer output
+Installer/Output/
+
+# LibVLC (large files)
+libvlc/
+
+# User-specific files
+*.rsuser
+*.userprefs
+
+# Build logs
+msbuild.log
+msbuild.err
+msbuild.wrn
+
