@@ -51,3 +51,6 @@ msbuild.log
 msbuild.err
 msbuild.wrn
 
+
+publish/
+Installer/Output/
