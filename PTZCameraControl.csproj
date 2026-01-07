@@ -10,15 +10,21 @@
     <RootNamespace>PTZCameraControl</RootNamespace>
     <Version>1.0.0</Version>
     <Authors>Robert Foster</Authors>
-    <Description>Professional ONVIF Profile S PTZ Camera Controller with Live Video</Description>
-    <Company>Video Scripts</Company>
+    <Description>Professional ONVIF Profile S PTZ Camera Controller with Live Video by Robert Foster</Description>
+    <Company>Robert Foster</Company>
     <Product>PTZ Camera Control</Product>
     <Copyright>Copyright © 2025 Robert Foster</Copyright>
+    <ApplicationIcon>warrior_icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="LibVLCSharp.WPF" Version="3.8.5" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="warrior_icon.ico" />
   </ItemGroup>
 
 </Project>

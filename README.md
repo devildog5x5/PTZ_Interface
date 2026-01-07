@@ -82,7 +82,9 @@ MIT License - See [LICENSE.txt](LICENSE.txt) for details.
 
 ## Author
 
-Robert Foster - 2025
+**Robert Foster** - 2025
+
+Professional ONVIF PTZ Camera Controller with LibVLC video streaming support.
 
 ## Contributing
 
