@@ -22,7 +22,6 @@ namespace PTZCameraControl
         public MainWindow()
         {
             InitializeComponent();
-            Core.Initialize();
 
             _ptzService = new OnvifPtzService();
             _ptzService.StatusChanged += PtzService_StatusChanged;
@@ -32,6 +31,60 @@ namespace PTZCameraControl
             _settings = CameraSettings.Load();
             LoadSettings();
             UpdateConnectionIndicator(false);
+            
+            // Initialize LibVLC after window is loaded (deferred initialization)
+            this.Loaded += MainWindow_Loaded;
+        }
+
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Initialize LibVLC with proper path handling
+            try
+            {
+                var exeLocation = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                var exeDir = !string.IsNullOrEmpty(exeLocation) 
+                    ? System.IO.Path.GetDirectoryName(exeLocation) 
+                    : System.AppDomain.CurrentDomain.BaseDirectory;
+                
+                var libVlcPaths = new[]
+                {
+                    System.IO.Path.Combine(exeDir ?? "", "libvlc", "win-x64"),
+                    System.IO.Path.Combine(exeDir ?? "", "runtimes", "win-x64", "native"),
+                    exeDir ?? ""
+                };
+
+                string? libVlcPath = null;
+                foreach (var path in libVlcPaths)
+                {
+                    if (System.IO.Directory.Exists(path))
+                    {
+                        var libvlcDll = System.IO.Path.Combine(path, "libvlc.dll");
+                        if (System.IO.File.Exists(libvlcDll))
+                        {
+                            libVlcPath = path;
+                            break;
+                        }
+                    }
+                }
+
+                if (libVlcPath != null)
+                {
+                    Core.Initialize(libVlcPath);
+                    System.Diagnostics.Debug.WriteLine($"LibVLC initialized from: {libVlcPath}");
+                }
+                else
+                {
+                    // Try default initialization (searches common paths)
+                    Core.Initialize();
+                    System.Diagnostics.Debug.WriteLine("LibVLC initialized with default search");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LibVLC initialization warning: {ex.Message}");
+                UpdateStatus("⚠️ LibVLC not available - video streaming disabled. PTZ controls will still work.", true);
+                // Continue without LibVLC - video streaming won't work but UI will load
+            }
         }
 
         private void LoadSettings()

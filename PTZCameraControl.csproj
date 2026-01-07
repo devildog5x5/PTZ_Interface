@@ -27,5 +27,19 @@
     <Resource Include="warrior_icon.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="libvlc\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="CopyLibVLC" AfterTargets="Publish">
+    <ItemGroup>
+      <LibVlcFiles Include="$(PublishDir)runtimes\win-x64\native\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)libvlc\win-x64" Condition="!Exists('$(PublishDir)libvlc\win-x64')" />
+    <Copy SourceFiles="@(LibVlcFiles)" DestinationFolder="$(PublishDir)libvlc\win-x64\%(RecursiveDir)" />
+  </Target>
+
 </Project>
 
