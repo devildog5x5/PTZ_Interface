@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 
-namespace PTZCameraControl.Models
+namespace PTZCameraOperator.Models
 {
     public class CameraSettings
     {

@@ -1,0 +1,289 @@
+<!--
+============================================================================
+MainWindow.xaml - PTZ Camera Operator Control Window
+Professional PTZ Camera Controller with separate Video Observation Window
+By Robert Foster - Dark Warrior Theme
+============================================================================
+-->
+<Window x:Class="PTZCameraOperator.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PTZ Camera Operator - Control Panel" 
+        Height="700" Width="1000"
+        MinHeight="550" MinWidth="850"
+        MaxHeight="{x:Static SystemParameters.PrimaryScreenHeight}"
+        MaxWidth="{x:Static SystemParameters.PrimaryScreenWidth}"
+        Background="{StaticResource BgDarkBrush}"
+        WindowStartupLocation="CenterScreen"
+        Closing="Window_Closing"
+        KeyDown="Window_KeyDown"
+        KeyUp="Window_KeyUp"
+        Focusable="True">
+    
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{StaticResource BgCardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+            <Grid Margin="24,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="PTZ CAMERA OPERATOR" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AccentGoldBrush}"/>
+                    <TextBlock Text="Professional ONVIF PTZ Controller by Robert Foster" FontSize="12" Foreground="{StaticResource TextMutedBrush}"/>
+                </StackPanel>
+                
+                <!-- Connection Status -->
+                <Border Grid.Column="1" Background="{StaticResource BgInputBrush}" CornerRadius="20" Padding="16,8">
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="ConnectionIndicator" Width="10" Height="10" Fill="{StaticResource AccentRedBrush}" Margin="0,0,10,0"/>
+                        <TextBox x:Name="ConnectionLabel" Text="OFFLINE" 
+                                 IsReadOnly="True"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="{StaticResource TextMutedBrush}" FontSize="13"
+                                 Cursor="IBeam"
+                                 MinWidth="70"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Main Content -->
+        <Grid Grid.Row="1" Margin="24,20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Panel - Connection & Settings -->
+            <Border Grid.Column="0" Background="{StaticResource BgCardBrush}" 
+                    CornerRadius="8" Padding="18" Margin="0,0,12,0"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="CONNECTION" FontSize="14" FontWeight="Bold" 
+                                   Foreground="{StaticResource AccentBlueBrush}" Margin="0,0,0,18"/>
+
+                        <TextBlock Text="Camera IP Address" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <TextBox x:Name="HostTextBox" Style="{StaticResource ModernTextBox}"
+                                 Text="192.168.1.12" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="ONVIF Port" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <TextBox x:Name="PortTextBox" Style="{StaticResource ModernTextBox}"
+                                 Text="8080" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="Username" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <TextBox x:Name="UsernameTextBox" Style="{StaticResource ModernTextBox}"
+                                 Text="admin" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="Password" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <PasswordBox x:Name="PasswordBox" Style="{StaticResource ModernPasswordBox}"
+                                     Margin="0,0,0,18"/>
+
+                        <Button x:Name="ConnectButton" Content="⚡ CONNECT" 
+                                Style="{StaticResource PrimaryButton}"
+                                Click="ConnectButton_Click"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
+
+                        <Button x:Name="PingButton" Content="🔍 PING" 
+                                Style="{StaticResource ModernButton}"
+                                Click="PingButton_Click"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
+
+                        <!-- Discovery Section -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="DiscoveryButton" Content="🔎 DISCOVER" 
+                                    Style="{StaticResource ModernButton}"
+                                    Click="DiscoveryButton_Click"
+                                    HorizontalAlignment="Stretch"/>
+                            <Button x:Name="StopDiscoveryButton" Grid.Column="2" Content="⬛" 
+                                    Style="{StaticResource ModernButton}"
+                                    Click="StopDiscoveryButton_Click" 
+                                    Width="45" IsEnabled="False"/>
+                        </Grid>
+
+                        <!-- Discovered Cameras List -->
+                        <TextBlock Text="Discovered Cameras" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" Margin="0,12,0,5"/>
+                        <Border Background="{StaticResource BgInputBrush}"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                MaxHeight="120" Margin="0,0,0,12">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ListBox x:Name="DiscoveredCamerasListBox" 
+                                         Background="Transparent"
+                                         Foreground="{StaticResource TextPrimaryBrush}"
+                                         BorderThickness="0"
+                                         Padding="5,5"
+                                         FontSize="13"
+                                         SelectionChanged="DiscoveredCamerasListBox_SelectionChanged"
+                                         MouseDoubleClick="DiscoveredCamerasListBox_MouseDoubleClick"
+                                         SelectionMode="Single">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" Cursor="Hand"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="8,4"/>
+                                            <Setter Property="Margin" Value="2"/>
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#30363d"/>
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource AccentGoldBrush}"/>
+                                                    <Setter Property="Foreground" Value="#0d1117"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                </ListBox>
+                            </ScrollViewer>
+                        </Border>
+
+                        <Button x:Name="OpenVideoWindowButton" Content="📹 OPEN VIDEO WINDOW" 
+                                Style="{StaticResource PrimaryButton}"
+                                Click="OpenVideoWindowButton_Click"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,18"/>
+
+                        <TextBlock Text="PTZ SPEED" FontSize="14" FontWeight="Bold" 
+                                   Foreground="{StaticResource AccentBlueBrush}" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="Pan/Tilt Speed" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <Slider x:Name="PanTiltSpeedSlider" Minimum="0.1" Maximum="1.0" Value="0.5" 
+                                TickFrequency="0.1" IsSnapToTickEnabled="True" Margin="0,0,0,8"/>
+                        <TextBlock x:Name="PanTiltSpeedLabel" Text="0.5" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" HorizontalAlignment="Right" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="Zoom Speed" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <Slider x:Name="ZoomSpeedSlider" Minimum="0.1" Maximum="1.0" Value="0.3" 
+                                TickFrequency="0.1" IsSnapToTickEnabled="True" Margin="0,0,0,8"/>
+                        <TextBlock x:Name="ZoomSpeedLabel" Text="0.3" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="11" HorizontalAlignment="Right" Margin="0,0,0,12"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Right Panel - PTZ Controls -->
+            <Border Grid.Column="1" Background="{StaticResource BgCardBrush}" 
+                    CornerRadius="8" Padding="24"
+                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                        <TextBlock Text="PTZ CONTROLS" FontSize="18" FontWeight="Bold" 
+                                   Foreground="{StaticResource AccentGoldBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="(WASD / Arrows / +/- / H)" FontSize="11" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   Margin="12,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- PTZ Control Pad -->
+                    <Grid Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="60"/>
+                            <RowDefinition Height="60"/>
+                            <RowDefinition Height="60"/>
+                            <RowDefinition Height="60"/>
+                            <RowDefinition Height="60"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="60"/>
+                            <ColumnDefinition Width="60"/>
+                            <ColumnDefinition Width="60"/>
+                            <ColumnDefinition Width="60"/>
+                            <ColumnDefinition Width="60"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Pan/Tilt Buttons -->
+                        <Button x:Name="TiltUpButton" Grid.Row="0" Grid.Column="1" Content="▲" Style="{StaticResource PtzButton}" 
+                                PreviewMouseDown="PtzButton_MouseDown" PreviewMouseUp="PtzButton_MouseUp"
+                                Tag="TiltUp" IsEnabled="False" ToolTip="Tilt Up (W or ↑)"/>
+                        <Button x:Name="PanLeftButton" Grid.Row="1" Grid.Column="0" Content="◄" Style="{StaticResource PtzButton}" 
+                                PreviewMouseDown="PtzButton_MouseDown" PreviewMouseUp="PtzButton_MouseUp"
+                                Tag="PanLeft" IsEnabled="False" ToolTip="Pan Left (A or ←)"/>
+                        <Button x:Name="PanRightButton" Grid.Row="1" Grid.Column="2" Content="►" Style="{StaticResource PtzButton}" 
+                                PreviewMouseDown="PtzButton_MouseDown" PreviewMouseUp="PtzButton_MouseUp"
+                                Tag="PanRight" IsEnabled="False" ToolTip="Pan Right (D or →)"/>
+                        <Button x:Name="TiltDownButton" Grid.Row="2" Grid.Column="1" Content="▼" Style="{StaticResource PtzButton}" 
+                                PreviewMouseDown="PtzButton_MouseDown" PreviewMouseUp="PtzButton_MouseUp"
+                                Tag="TiltDown" IsEnabled="False" ToolTip="Tilt Down (S or ↓)"/>
+
+                        <!-- Zoom Buttons -->
+                        <Button x:Name="ZoomInButton" Grid.Row="0" Grid.Column="3" Content="🔍+" Style="{StaticResource PtzButton}" 
+                                PreviewMouseDown="PtzButton_MouseDown" PreviewMouseUp="PtzButton_MouseUp"
+                                Tag="ZoomIn" IsEnabled="False" ToolTip="Zoom In (+)"/>
+                        <Button x:Name="ZoomOutButton" Grid.Row="2" Grid.Column="3" Content="🔍-" Style="{StaticResource PtzButton}" 
+                                PreviewMouseDown="PtzButton_MouseDown" PreviewMouseUp="PtzButton_MouseUp"
+                                Tag="ZoomOut" IsEnabled="False" ToolTip="Zoom Out (-)"/>
+
+                        <!-- Home Position -->
+                        <Button x:Name="HomeButton" Grid.Row="1" Grid.Column="1" Content="🏠" Style="{StaticResource PtzButton}" 
+                                Click="HomeButton_Click" ToolTip="Go to Home Position (H)" IsEnabled="False"/>
+                        <Button x:Name="SetHomeButton" Grid.Row="3" Grid.Column="1" Content="SET HOME" Style="{StaticResource ModernButton}" 
+                                Click="SetHomeButton_Click" Margin="0,10,0,0" IsEnabled="False"/>
+                    </Grid>
+
+                    <!-- Status Display -->
+                    <Border Grid.Row="2" Background="{StaticResource BgInputBrush}" 
+                            CornerRadius="6" Padding="12" Margin="0,20,0,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="150">
+                            <TextBox x:Name="StatusText" IsReadOnly="True" 
+                                     Background="Transparent" BorderThickness="0"
+                                     Foreground="{StaticResource TextPrimaryBrush}" 
+                                     FontSize="12" TextWrapping="Wrap"
+                                     Cursor="IBeam"/>
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Footer -->
+        <Border Grid.Row="2" Background="{StaticResource BgCardBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0">
+            <TextBlock Text="PTZ Camera Operator v2.0 - Professional ONVIF Controller" 
+                       Foreground="{StaticResource TextMutedBrush}" 
+                       FontSize="11" 
+                       HorizontalAlignment="Center" 
+                       VerticalAlignment="Center" 
+                       Margin="0,8"/>
+        </Border>
+    </Grid>
+</Window>
