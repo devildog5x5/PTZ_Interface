@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PTZCameraOperator</AssemblyName>
+    <RootNamespace>PTZCameraOperator</RootNamespace>
+    <Version>2.0.0</Version>
+    <Authors>Robert Foster</Authors>
+    <Description>Professional PTZ Camera Operator Application with Video Observation Window</Description>
+    <Company>Robert Foster</Company>
+    <Product>PTZ Camera Operator</Product>
+    <Copyright>Copyright © 2025 Robert Foster</Copyright>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibVLCSharp.WPF" Version="3.8.5" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.20" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="libvlc\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
