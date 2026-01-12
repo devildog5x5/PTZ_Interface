@@ -6,9 +6,9 @@ namespace PTZCameraOperator.Models
 {
     public class CameraSettings
     {
-        public string Host { get; set; } = "192.168.1.12";
-        public int Port { get; set; } = 8080;
-        public string Username { get; set; } = "admin";
+        public string Host { get; set; } = "192.168.1.11";
+        public int Port { get; set; } = 443;
+        public string Username { get; set; } = "root";
         public string Password { get; set; } = "XTL.a1.1000!";
         public string StreamUrl { get; set; } = "";
         public float PanSpeed { get; set; } = 0.5f;

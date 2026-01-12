@@ -24,6 +24,7 @@ namespace PTZCameraOperator.Services
         private string? _digestNonce;      // Digest authentication nonce (from WWW-Authenticate header)
         private string? _digestQop;        // Digest authentication qop (from WWW-Authenticate header)
         private bool _useDigestAuth = false; // Whether to use Digest Authentication instead of Basic
+        private string? _connectedEndpointType = null; // Track what type of endpoint we connected to: "ONVIF", "HiSilicon", "Hikvision", "Dahua", etc.
         
         public bool IsConnected { get; private set; }
         
@@ -198,7 +199,8 @@ namespace PTZCameraOperator.Services
                     $"{protocol}://{host}:{port}/onvif/device",
                     // Manufacturer-specific paths (non-ONVIF)
                     $"http://{host}:{port}/ISAPI/System/deviceInfo",              // Hikvision ISAPI
-                    $"http://{host}:{port}/cgi-bin/magicBox.cgi?action=getDeviceType", // Generic CGI
+                    $"http://{host}:{port}/cgi-bin/magicBox.cgi?action=getDeviceType", // Dahua CGI
+                    $"http://{host}:{port}/web/cgi-bin/hi3510/ptzctrl.cgi",       // HiSilicon Hi3510 PTZ control (found in diagnostic!)
                     $"http://{host}:{port}/",                                     // Root path
                 };
                 
@@ -283,69 +285,242 @@ namespace PTZCameraOperator.Services
                         _baseUrl = endpoint;
                         StatusChanged?.Invoke(this, $"Trying endpoint: {endpoint}");
 
-                        // Try both SOAP 1.1 and SOAP 1.2 formats
-                        // Some cameras only support one version, so we try both
-                        var soapFormats = new[] { "1.2", "1.1" };
+                        // Check if this is a CGI/ISAPI endpoint (not ONVIF)
+                        // CGI endpoints use GET requests with query parameters, not SOAP POST
+                        // HiSilicon Hi3510 endpoint: /web/cgi-bin/hi3510/ptzctrl.cgi
+                        bool isCgiEndpoint = endpoint.Contains("/cgi-bin/") || endpoint.Contains("/ISAPI/") || endpoint.Contains("/web/cgi-bin/");
                         
-                        foreach (var soapVersion in soapFormats)
+                        if (isCgiEndpoint)
                         {
-                            StatusChanged?.Invoke(this, $"Trying {endpoint} with SOAP {soapVersion}");
-                            
-                            // Test connection using GetDeviceInformation request
-                            // This is a simple request that works on all ONVIF cameras
-                            var request = CreateSoapRequest("GetDeviceInformation", "http://www.onvif.org/ver10/device/wsdl", soapVersion);
-                            var (response, httpStatusCode, errorMessage) = await SendRequestAsync(request);
-                            
-                            if (response != null)
+                            // Test CGI/ISAPI endpoint with GET request (not SOAP)
+                            // For HiSilicon, try with action=getstatus query parameter if base URL doesn't have params
+                            string testUrl = endpoint;
+                            if (endpoint.Contains("hi3510", StringComparison.OrdinalIgnoreCase) && !endpoint.Contains("?"))
                             {
-                                // Success! We found a working endpoint, SOAP version, and username
+                                // Try with action=getstatus first
+                                testUrl = endpoint.Contains("?") ? endpoint : $"{endpoint}?action=getstatus";
+                            }
+                            
+                            StatusChanged?.Invoke(this, $"Testing {testUrl} with GET request (Basic Auth)");
+                            var (cgiResponse, cgiStatusCode, cgiErrorMessage) = await TestCgiEndpointAsync(testUrl, tryUsername ?? "", password ?? "");
+                            
+                            // If getstatus fails, try without query params (some cameras accept bare endpoint)
+                            if ((cgiResponse == null || !cgiStatusCode.HasValue || cgiStatusCode.Value != 200) && testUrl != endpoint)
+                            {
+                                StatusChanged?.Invoke(this, $"Trying {endpoint} without query parameters...");
+                                var (cgiResponse2, cgiStatusCode2, _) = await TestCgiEndpointAsync(endpoint, tryUsername ?? "", password ?? "");
+                                if (cgiResponse2 != null && cgiStatusCode2.HasValue && cgiStatusCode2.Value == 200)
+                                {
+                                    cgiResponse = cgiResponse2;
+                                    cgiStatusCode = cgiStatusCode2;
+                                }
+                            }
+                            
+                            if (cgiResponse != null && cgiStatusCode.HasValue && cgiStatusCode.Value == 200)
+                            {
+                                // Success! CGI endpoint works with these credentials
                                 IsConnected = true;
-                                var successMsg = $"Connected to camera via {endpoint} (SOAP {soapVersion})";
+                                
+                                // Detect endpoint type based on URL
+                                if (endpoint.Contains("hi3510", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _connectedEndpointType = "HiSilicon";
+                                    _baseUrl = $"http://{host}:{port}/web/cgi-bin/hi3510"; // Base URL without the script name
+                                }
+                                else if (endpoint.Contains("/ISAPI/", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _connectedEndpointType = "Hikvision";
+                                    _baseUrl = $"http://{host}:{port}";
+                                }
+                                else if (endpoint.Contains("/cgi-bin/", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _connectedEndpointType = "Dahua";
+                                    _baseUrl = $"http://{host}:{port}";
+                                }
+                                else
+                                {
+                                    _connectedEndpointType = "GenericCGI";
+                                    _baseUrl = $"http://{host}:{port}";
+                                }
+                                
+                                var successMsg = $"Connected to camera via {endpoint} ({_connectedEndpointType} API)";
                                 if (tryUsername != username)
                                 {
-                                    successMsg += $" using ONVIF username: {tryUsername}";
+                                    successMsg += $" using username: {tryUsername}";
                                 }
                                 StatusChanged?.Invoke(this, successMsg);
+                                System.Diagnostics.Debug.WriteLine($"✓ CGI endpoint works: {endpoint} with user '{tryUsername}', type: {_connectedEndpointType}");
                                 
-                                // Try to discover stream URL in background (non-blocking)
-                                // This helps auto-populate the stream URL field
-                                _ = Task.Run(async () =>
+                                // Store connection details
+                                Host = host;
+                                Port = port;
+                                _username = tryUsername ?? "";
+                                _password = password ?? "";
+                                
+                                // For HiSilicon cameras, generate a default RTSP URL since they don't support ONVIF stream discovery
+                                if (_connectedEndpointType == "HiSilicon")
                                 {
-                                    var streamUrl = await GetStreamUriAsync();
-                                    if (!string.IsNullOrEmpty(streamUrl))
+                                    // Common HiSilicon RTSP URL formats
+                                    var encodedPassword = Uri.EscapeDataString(_password);
+                                    var creds = !string.IsNullOrEmpty(_username) ? $"{_username}:{encodedPassword}@" : "";
+                                    
+                                    // Try common HiSilicon RTSP formats
+                                    var defaultRtspUrl = $"rtsp://{creds}{host}:554/Streaming/Channels/101";
+                                    
+                                    // Fire event in background to update UI
+                                    _ = Task.Run(() =>
                                     {
-                                        StreamUrlDiscovered?.Invoke(this, streamUrl);
-                                    }
-                                });
+                                        StreamUrlDiscovered?.Invoke(this, defaultRtspUrl);
+                                    });
+                                }
                                 
                                 return true;
                             }
+                            else
+                            {
+                                // Track error for CGI endpoint
+                                var cgiStatusMsg = cgiStatusCode.HasValue 
+                                    ? $"HTTP {cgiStatusCode} - {cgiErrorMessage ?? "No response"}"
+                                    : (cgiErrorMessage ?? "Network timeout or unreachable");
+                                
+                                if (!string.IsNullOrEmpty(tryUsername))
+                                {
+                                    cgiStatusMsg = $"[User: {tryUsername}] {cgiStatusMsg}";
+                                }
+                                
+                                StatusChanged?.Invoke(this, $"Failed {endpoint} GET: {cgiStatusMsg}");
+                                
+                                // Extract authentication requirements from error message
+                                if (!string.IsNullOrEmpty(cgiErrorMessage))
+                                {
+                                    var authMatch = System.Text.RegularExpressions.Regex.Match(cgiErrorMessage, @"Authentication method required:\s*([^()]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                    if (authMatch.Success)
+                                    {
+                                        var authMethod = authMatch.Groups[1].Value.Trim();
+                                        StatusChanged?.Invoke(this, $"  → CGI endpoint requires: {authMethod}");
+                                    }
+                                }
+                                else if (cgiStatusCode == 401)
+                                {
+                                    StatusChanged?.Invoke(this, $"  → CGI endpoint returned HTTP 401 Unauthorized");
+                                }
+                                
+                                allErrors.Add($"{endpoint} GET: {cgiStatusMsg}");
+                                System.Diagnostics.Debug.WriteLine($"✗ CGI endpoint failed: {endpoint} with user '{tryUsername}': {cgiStatusMsg}");
+                            }
+                        }
                         else
                         {
-                            // Track which username was used for this attempt
-                            if (!string.IsNullOrEmpty(tryUsername) && !usernamesTried.Contains(tryUsername))
+                            // ONVIF endpoint - try SOAP 1.1 and 1.2
+                            var soapFormats = new[] { "1.2", "1.1" };
+                            
+                            foreach (var soapVersion in soapFormats)
                             {
-                                usernamesTried.Add(tryUsername);
+                                StatusChanged?.Invoke(this, $"Trying {endpoint} with SOAP {soapVersion}");
+                                
+                                // Test connection using GetDeviceInformation request
+                                // This is a simple request that works on all ONVIF cameras
+                                var request = CreateSoapRequest("GetDeviceInformation", "http://www.onvif.org/ver10/device/wsdl", soapVersion);
+                                var (response, httpStatusCode, errorMessage) = await SendRequestAsync(request);
+                                
+                                if (response != null)
+                                {
+                                    // Success! We found a working endpoint, SOAP version, and username
+                                    IsConnected = true;
+                                    var successMsg = $"Connected to camera via {endpoint} (SOAP {soapVersion})";
+                                    if (tryUsername != username)
+                                    {
+                                        successMsg += $" using ONVIF username: {tryUsername}";
+                                    }
+                                    StatusChanged?.Invoke(this, successMsg);
+                                    
+                                    // Store connection details
+                                    Host = host;
+                                    Port = port;
+                                    _username = tryUsername ?? "";
+                                    _password = password ?? "";
+                                    _connectedEndpointType = "ONVIF"; // Standard ONVIF connection
+                                    
+                                    // Try to discover stream URL in background (non-blocking)
+                                    // This helps auto-populate the stream URL field
+                                    _ = Task.Run(async () =>
+                                    {
+                                        var streamUrl = await GetStreamUriAsync();
+                                        if (!string.IsNullOrEmpty(streamUrl))
+                                        {
+                                            StreamUrlDiscovered?.Invoke(this, streamUrl);
+                                        }
+                                    });
+                                    
+                                    return true;
+                                }
+                                else
+                                {
+                                    // Track which username was used for this attempt
+                                    if (!string.IsNullOrEmpty(tryUsername) && !usernamesTried.Contains(tryUsername))
+                                    {
+                                        usernamesTried.Add(tryUsername);
+                                    }
+                                    
+                                    // Always log the error, even if errorMessage is empty (might be timeout)
+                                    var statusMsg = httpStatusCode.HasValue 
+                                        ? $"HTTP {httpStatusCode} - {errorMessage ?? "No response"}"
+                                        : (errorMessage ?? "Network timeout or unreachable");
+                                    
+                                    // Extract authentication method requirements from error message
+                                    string? authMethod = null;
+                                    string? digestRealm = null;
+                                    if (!string.IsNullOrEmpty(errorMessage))
+                                    {
+                                        // Look for "Authentication method required:" in error message
+                                        var authMatch = System.Text.RegularExpressions.Regex.Match(errorMessage, @"Authentication method required:\s*([^\n]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                        if (authMatch.Success)
+                                        {
+                                            authMethod = authMatch.Groups[1].Value.Trim();
+                                            
+                                            // If Digest, extract realm and nonce
+                                            if (authMethod.Contains("Digest", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                var realmMatch = System.Text.RegularExpressions.Regex.Match(errorMessage, @"realm=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                                if (realmMatch.Success)
+                                                {
+                                                    digestRealm = realmMatch.Groups[1].Value;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Add username to error message for clarity
+                                    if (!string.IsNullOrEmpty(tryUsername))
+                                    {
+                                        statusMsg = $"[User: {tryUsername}] {statusMsg}";
+                                    }
+                                    
+                                    StatusChanged?.Invoke(this, $"Failed {endpoint} SOAP {soapVersion}: {statusMsg}");
+                                    
+                                    // Log authentication requirements prominently
+                                    if (!string.IsNullOrEmpty(authMethod))
+                                    {
+                                        StatusChanged?.Invoke(this, $"  → Camera requires authentication: {authMethod}");
+                                        if (!string.IsNullOrEmpty(digestRealm))
+                                        {
+                                            StatusChanged?.Invoke(this, $"    → Digest Realm: {digestRealm}");
+                                        }
+                                        if (authMethod.Contains("Digest", StringComparison.OrdinalIgnoreCase) && _useDigestAuth)
+                                        {
+                                            StatusChanged?.Invoke(this, $"    → Using Digest Auth (retrying automatically)");
+                                        }
+                                    }
+                                    else if (httpStatusCode == 401)
+                                    {
+                                        // If 401 but no auth method specified, log that we couldn't detect it
+                                        StatusChanged?.Invoke(this, $"  → HTTP 401 Unauthorized - authentication method not specified in response");
+                                    }
+                                    
+                                    allErrors.Add($"{endpoint} SOAP {soapVersion}: {statusMsg}");
+                                    System.Diagnostics.Debug.WriteLine($"Failed {endpoint} SOAP {soapVersion} with user '{tryUsername}': {statusMsg}");
+                                }
                             }
-                            
-                            // Always log the error, even if errorMessage is empty (might be timeout)
-                            var statusMsg = httpStatusCode.HasValue 
-                                ? $"HTTP {httpStatusCode} - {errorMessage ?? "No response"}"
-                                : (errorMessage ?? "Network timeout or unreachable");
-                            
-                            // Add username to error message for clarity
-                            if (!string.IsNullOrEmpty(tryUsername))
-                            {
-                                statusMsg = $"[User: {tryUsername}] {statusMsg}";
-                            }
-                            
-                            StatusChanged?.Invoke(this, $"Failed {endpoint} SOAP {soapVersion}: {statusMsg}");
-                            allErrors.Add($"{endpoint} SOAP {soapVersion}: {statusMsg}");
-                            System.Diagnostics.Debug.WriteLine($"Failed {endpoint} SOAP {soapVersion} with user '{tryUsername}': {statusMsg}");
-                            
-                            // Extract authentication method from WWW-Authenticate header if available
-                            // This will be done in SendRequestAsync and passed back
-                        }
                         }
                     }
                 } // End of username loop
@@ -562,14 +737,108 @@ namespace PTZCameraOperator.Services
             }
         }
 
+        /// <summary>
+        /// Tests a CGI/ISAPI endpoint with GET request and Basic Authentication
+        /// CGI endpoints don't use SOAP - they use GET requests with query parameters
+        /// </summary>
+        /// <param name="endpointUrl">Full URL of the CGI endpoint (e.g., http://192.168.1.12:80/cgi-bin/magicBox.cgi?action=getDeviceType)</param>
+        /// <param name="username">Username for Basic Auth</param>
+        /// <param name="password">Password for Basic Auth</param>
+        /// <returns>Tuple containing response (null if failed), HTTP status code, and error message</returns>
+        private async Task<(string? response, int? statusCode, string? errorMessage)> TestCgiEndpointAsync(string endpointUrl, string username, string password)
+        {
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, endpointUrl);
+                
+                // Add Basic Authentication header
+                if (!string.IsNullOrEmpty(username))
+                {
+                    var authValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authValue);
+                }
+                
+                var response = await _httpClient.SendAsync(request);
+                var responseText = await response.Content.ReadAsStringAsync();
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    // Success! Return the response text
+                    return (responseText, (int)response.StatusCode, null);
+                }
+                else
+                {
+                    // Check for authentication requirement from WWW-Authenticate header
+                    var authHeaders = response.Headers.WwwAuthenticate.ToList();
+                    string? errorMsg = $"HTTP {response.StatusCode} - {response.ReasonPhrase}";
+                    
+                    if (authHeaders != null && authHeaders.Any())
+                    {
+                        var authSchemes = string.Join(", ", authHeaders.Select(h => h.Scheme));
+                        errorMsg += $" | Authentication method required: {authSchemes}";
+                        
+                        // Check for Digest authentication
+                        var digestHeader = authHeaders.FirstOrDefault(h => h.Scheme.Equals("Digest", StringComparison.OrdinalIgnoreCase));
+                        if (digestHeader != null && !string.IsNullOrEmpty(digestHeader.Parameter))
+                        {
+                            // Parse Digest challenge parameters
+                            var realmMatch = System.Text.RegularExpressions.Regex.Match(digestHeader.Parameter, @"realm=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                            if (realmMatch.Success)
+                            {
+                                errorMsg += $" | Digest Realm: {realmMatch.Groups[1].Value}";
+                            }
+                        }
+                        
+                        // Check for Basic Auth requirement
+                        var basicHeader = authHeaders.FirstOrDefault(h => h.Scheme.Equals("Basic", StringComparison.OrdinalIgnoreCase));
+                        if (basicHeader != null && digestHeader == null)
+                        {
+                            errorMsg += " | Basic Auth required (credentials may be incorrect)";
+                        }
+                    }
+                    else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    {
+                        // 401 but no WWW-Authenticate header
+                        errorMsg += " | Unauthorized (no authentication method specified)";
+                    }
+                    
+                    // Truncate long error messages
+                    if (responseText.Length > 200)
+                    {
+                        errorMsg += $": {responseText.Substring(0, 200)}...";
+                    }
+                    else if (!string.IsNullOrEmpty(responseText))
+                    {
+                        errorMsg += $": {responseText}";
+                    }
+                    
+                    return (null, (int)response.StatusCode, errorMsg);
+                }
+            }
+            catch (HttpRequestException httpEx)
+            {
+                return (null, null, $"Network error: {httpEx.Message}");
+            }
+            catch (TaskCanceledException)
+            {
+                return (null, null, "Request timeout");
+            }
+            catch (Exception ex)
+            {
+                return (null, null, $"Request failed: {ex.Message}");
+            }
+        }
+
         public void Disconnect()
         {
             IsConnected = false;
             Host = "";
-            Port = 80;
+            Port = 0;
             _username = "";
             _password = "";
             _baseUrl = "";
+            _connectedEndpointType = null;
+            _useDigestAuth = false;
             StatusChanged?.Invoke(this, "Disconnected");
         }
 
@@ -623,6 +892,13 @@ namespace PTZCameraOperator.Services
         {
             if (!IsConnected) return false;
             
+            // Route to manufacturer-specific PTZ if connected via non-ONVIF endpoint
+            if (_connectedEndpointType == "HiSilicon")
+            {
+                return await HiSiliconContinuousMove(panSpeed, tiltSpeed, zoomSpeed);
+            }
+            
+            // Standard ONVIF PTZ control
             try
             {
                 var request = CreateContinuousMoveRequest(panSpeed, tiltSpeed, zoomSpeed);
@@ -631,6 +907,54 @@ namespace PTZCameraOperator.Services
             }
             catch
             {
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// HiSilicon Hi3510 PTZ control using CGI GET requests
+        /// Format: /web/cgi-bin/hi3510/ptzctrl.cgi?-step=0&-act=[action]&speed=[1-8]
+        /// </summary>
+        private async Task<bool> HiSiliconContinuousMove(float panSpeed, float tiltSpeed, float zoomSpeed)
+        {
+            try
+            {
+                // HiSilicon Hi3510 requires separate commands for each axis
+                bool success = true;
+                var speed = (int)Math.Max(1, Math.Min(8, Math.Abs(Math.Max(panSpeed, Math.Max(tiltSpeed, zoomSpeed))) * 8));
+                
+                // Send pan command if needed
+                if (Math.Abs(panSpeed) > 0.01f)
+                {
+                    var action = panSpeed > 0 ? "right" : "left";
+                    var url = $"{_baseUrl}/ptzctrl.cgi?-step=0&-act={action}&speed={speed}";
+                    var (response, statusCode, _) = await TestCgiEndpointAsync(url, _username, _password);
+                    success = success && (response != null || (statusCode.HasValue && statusCode.Value == 200));
+                }
+                
+                // Send tilt command if needed
+                if (Math.Abs(tiltSpeed) > 0.01f)
+                {
+                    var action = tiltSpeed > 0 ? "up" : "down";
+                    var url = $"{_baseUrl}/ptzctrl.cgi?-step=0&-act={action}&speed={speed}";
+                    var (response, statusCode, _) = await TestCgiEndpointAsync(url, _username, _password);
+                    success = success && (response != null || (statusCode.HasValue && statusCode.Value == 200));
+                }
+                
+                // Send zoom command if needed
+                if (Math.Abs(zoomSpeed) > 0.01f)
+                {
+                    var action = zoomSpeed > 0 ? "zoomin" : "zoomout";
+                    var url = $"{_baseUrl}/ptzctrl.cgi?-step=0&-act={action}";
+                    var (response, statusCode, _) = await TestCgiEndpointAsync(url, _username, _password);
+                    success = success && (response != null || (statusCode.HasValue && statusCode.Value == 200));
+                }
+                
+                return success;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"HiSilicon PTZ move error: {ex.Message}");
                 return false;
             }
         }
@@ -646,6 +970,13 @@ namespace PTZCameraOperator.Services
         {
             if (!IsConnected) return false;
             
+            // Route to manufacturer-specific stop if connected via non-ONVIF endpoint
+            if (_connectedEndpointType == "HiSilicon")
+            {
+                return await HiSiliconStop();
+            }
+            
+            // Standard ONVIF stop
             try
             {
                 var request = CreateStopRequest();
@@ -654,6 +985,24 @@ namespace PTZCameraOperator.Services
             }
             catch
             {
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// HiSilicon Hi3510 stop command
+        /// </summary>
+        private async Task<bool> HiSiliconStop()
+        {
+            try
+            {
+                var url = $"{_baseUrl}/ptzctrl.cgi?-step=0&-act=stop";
+                var (response, statusCode, _) = await TestCgiEndpointAsync(url, _username, _password);
+                return response != null || (statusCode.HasValue && statusCode.Value == 200);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"HiSilicon PTZ stop error: {ex.Message}");
                 return false;
             }
         }
@@ -1022,7 +1371,7 @@ namespace PTZCameraOperator.Services
                     {
                         var authHeaders = response.Headers.WwwAuthenticate.ToList();
                         var authSchemes = string.Join(", ", authHeaders.Select(h => h.Scheme));
-                        errorMsg += $"\n  → Authentication method required: {authSchemes}";
+                        errorMsg += $" | Authentication method required: {authSchemes}";
                         System.Diagnostics.Debug.WriteLine($"Camera requires authentication: {authSchemes}");
                         
                         // Check if camera requires Digest Authentication
@@ -1033,8 +1382,31 @@ namespace PTZCameraOperator.Services
                             ParseDigestChallenge(digestHeader.Parameter);
                             _useDigestAuth = true;
                             System.Diagnostics.Debug.WriteLine($"Camera requires Digest Auth - Realm: {_digestRealm}, Nonce: {_digestNonce}");
-                            errorMsg += " (Digest challenge detected - will retry with Digest Auth)";
+                            
+                            // Add Digest challenge details to error message
+                            if (!string.IsNullOrEmpty(_digestRealm))
+                            {
+                                errorMsg += $" | Digest Realm: {_digestRealm}";
+                            }
+                            if (!string.IsNullOrEmpty(_digestNonce))
+                            {
+                                var noncePreview = _digestNonce.Length > 16 ? _digestNonce.Substring(0, 16) + "..." : _digestNonce;
+                                errorMsg += $" | Digest Nonce: {noncePreview}";
+                            }
+                            errorMsg += " | Will retry with Digest Auth";
                         }
+                        
+                        // Also check for Basic Auth requirement
+                        var basicHeader = authHeaders.FirstOrDefault(h => h.Scheme.Equals("Basic", StringComparison.OrdinalIgnoreCase));
+                        if (basicHeader != null && string.IsNullOrEmpty(digestHeader?.Parameter))
+                        {
+                            errorMsg += " | Basic Auth required (but credentials may be incorrect)";
+                        }
+                    }
+                    else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    {
+                        // 401 but no WWW-Authenticate header - unusual but possible
+                        errorMsg += " | Unauthorized (no authentication method specified)";
                     }
                     
                     if (!string.IsNullOrEmpty(responseText))

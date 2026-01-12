@@ -76,19 +76,19 @@ By Robert Foster - Dark Warrior Theme
                                    Foreground="{StaticResource TextMutedBrush}" 
                                    FontSize="11" Margin="0,0,0,5"/>
                         <TextBox x:Name="HostTextBox" Style="{StaticResource ModernTextBox}"
-                                 Text="192.168.1.12" Margin="0,0,0,12"/>
+                                 Text="192.168.1.11" Margin="0,0,0,12"/>
 
                         <TextBlock Text="ONVIF Port" 
                                    Foreground="{StaticResource TextMutedBrush}" 
                                    FontSize="11" Margin="0,0,0,5"/>
                         <TextBox x:Name="PortTextBox" Style="{StaticResource ModernTextBox}"
-                                 Text="8080" Margin="0,0,0,12"/>
+                                 Text="443" Margin="0,0,0,12"/>
 
                         <TextBlock Text="Username" 
                                    Foreground="{StaticResource TextMutedBrush}" 
                                    FontSize="11" Margin="0,0,0,5"/>
                         <TextBox x:Name="UsernameTextBox" Style="{StaticResource ModernTextBox}"
-                                 Text="admin" Margin="0,0,0,12"/>
+                                 Text="root" Margin="0,0,0,12"/>
 
                         <TextBlock Text="Password" 
                                    Foreground="{StaticResource TextMutedBrush}" 
@@ -105,6 +105,12 @@ By Robert Foster - Dark Warrior Theme
                                 Style="{StaticResource ModernButton}"
                                 Click="PingButton_Click"
                                 HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
+
+                        <Button x:Name="DiagnosticButton" Content="🔬 FULL DIAGNOSTIC" 
+                                Style="{StaticResource ModernButton}"
+                                Click="DiagnosticButton_Click"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,8"
+                                ToolTip="Test all camera APIs and connection methods to find what works"/>
 
                         <!-- Discovery Section -->
                         <Grid Margin="0,0,0,8">
@@ -264,13 +270,34 @@ By Robert Foster - Dark Warrior Theme
                     <!-- Status Display -->
                     <Border Grid.Row="2" Background="{StaticResource BgInputBrush}" 
                             CornerRadius="6" Padding="12" Margin="0,20,0,0">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="150">
-                            <TextBox x:Name="StatusText" IsReadOnly="True" 
-                                     Background="Transparent" BorderThickness="0"
-                                     Foreground="{StaticResource TextPrimaryBrush}" 
-                                     FontSize="12" TextWrapping="Wrap"
-                                     Cursor="IBeam"/>
-                        </ScrollViewer>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" MaxHeight="150">
+                                <TextBox x:Name="StatusText" IsReadOnly="True" 
+                                         Background="Transparent" BorderThickness="0"
+                                         Foreground="{StaticResource TextPrimaryBrush}" 
+                                         FontSize="12" TextWrapping="Wrap"
+                                         Cursor="IBeam"/>
+                            </ScrollViewer>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                <Button x:Name="CopyResultsButton" Content="📋 COPY RESULTS" 
+                                        Style="{StaticResource ModernButton}"
+                                        Click="CopyResultsButton_Click"
+                                        Padding="12,6"
+                                        FontSize="11"
+                                        ToolTip="Copy diagnostic results to clipboard"/>
+                                <Button x:Name="ClearStatusButton" Content="🗑️ CLEAR" 
+                                        Style="{StaticResource ModernButton}"
+                                        Click="ClearStatusButton_Click"
+                                        Padding="12,6"
+                                        Margin="8,0,0,0"
+                                        FontSize="11"
+                                        ToolTip="Clear status messages"/>
+                            </StackPanel>
+                        </Grid>
                     </Border>
                 </Grid>
             </Border>

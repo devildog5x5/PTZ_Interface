@@ -20,6 +20,7 @@ namespace PTZCameraOperator.Views
     {
         private readonly OnvifPtzService _ptzService;
         private readonly OnvifDiscoveryService _discoveryService;
+        private readonly CameraDiagnosticService _diagnosticService;
         private readonly CameraSettings _settings;
         private VideoWindow? _videoWindow;
         private CancellationTokenSource? _ptzMoveCts;
@@ -36,6 +37,9 @@ namespace PTZCameraOperator.Views
 
             _discoveryService = new OnvifDiscoveryService();
             _discoveryService.CameraDiscovered += DiscoveryService_CameraDiscovered;
+
+            _diagnosticService = new CameraDiagnosticService();
+            _diagnosticService.DiagnosticMessage += DiagnosticService_DiagnosticMessage;
 
             _settings = CameraSettings.Load();
             LoadSettings();
@@ -427,10 +431,116 @@ namespace PTZCameraOperator.Views
             }
         }
 
+        private async void DiagnosticButton_Click(object sender, RoutedEventArgs e)
+        {
+            DiagnosticButton.IsEnabled = false;
+            UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            UpdateStatus("Starting comprehensive camera diagnostic...");
+            UpdateStatus("This will test all known camera APIs and connection methods");
+            UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+            var host = HostTextBox.Text;
+            if (!int.TryParse(PortTextBox.Text, out int port))
+            {
+                UpdateStatus("Invalid port number", true);
+                DiagnosticButton.IsEnabled = true;
+                return;
+            }
+
+            var username = UsernameTextBox.Text;
+            var password = PasswordBox.Password;
+
+            try
+            {
+                var results = await _diagnosticService.RunFullDiagnostic(host, port, username, password);
+                
+                UpdateStatus("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                UpdateStatus("DIAGNOSTIC RESULTS SUMMARY:");
+                UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+                foreach (var result in results)
+                {
+                    var statusIcon = result.Value.Contains("SUCCESS") || result.Value.Contains("200 OK") ? "✓" : "✗";
+                    UpdateStatus($"{statusIcon} {result.Key}: {result.Value}");
+                }
+
+                // Check if we found any working endpoints
+                var workingEndpoints = results.Where(r => r.Value.Contains("SUCCESS") || r.Value.Contains("200 OK")).ToList();
+                if (workingEndpoints.Any())
+                {
+                    UpdateStatus("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    UpdateStatus("✓ WORKING ENDPOINTS FOUND:");
+                    UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    foreach (var endpoint in workingEndpoints)
+                    {
+                        UpdateStatus($"  ✓ {endpoint.Key}");
+                    }
+                    UpdateStatus("\nThese endpoints can be used for camera control!");
+                }
+                else
+                {
+                    UpdateStatus("\n⚠️ No working endpoints found. Check credentials and camera settings.", true);
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Diagnostic error: {ex.Message}", true);
+            }
+            finally
+            {
+                DiagnosticButton.IsEnabled = true;
+            }
+        }
+
+        private void DiagnosticService_DiagnosticMessage(object? sender, string message)
+        {
+            Dispatcher.Invoke(() => UpdateStatus(message));
+        }
+
+        private void CopyResultsButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var results = StatusText.Text;
+                if (string.IsNullOrWhiteSpace(results))
+                {
+                    UpdateStatus("No results to copy", true);
+                    return;
+                }
+
+                Clipboard.SetText(results);
+                UpdateStatus("✓ Results copied to clipboard!");
+                
+                // Show brief confirmation
+                var notification = new System.Windows.Controls.TextBlock
+                {
+                    Text = "✓ Copied to Clipboard!",
+                    Foreground = new SolidColorBrush(Colors.Green),
+                    FontSize = 11,
+                    Margin = new Thickness(0, 4, 0, 0),
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                
+                // You can paste the results anywhere (notepad, email, chat, etc.)
+                UpdateStatus("\nResults are now in your clipboard - you can paste them anywhere (Ctrl+V)");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Failed to copy: {ex.Message}", true);
+            }
+        }
+
+        private void ClearStatusButton_Click(object sender, RoutedEventArgs e)
+        {
+            StatusText.Text = "";
+            UpdateStatus("Status cleared.");
+        }
+
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             _ptzService?.Dispose();
             _discoveryService?.Dispose();
+            _diagnosticService?.Dispose();
             _videoWindow?.Close();
             SaveSettings();
         }
