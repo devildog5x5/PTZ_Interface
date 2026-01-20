@@ -1,14 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.NetworkInformation;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using LibVLCSharp.Shared;
 using PTZCameraOperator.Models;
 using PTZCameraOperator.Services;
+using CameraInfo = PTZCameraOperator.Models.CameraInfo;
 
 namespace PTZCameraOperator.Views
 {
@@ -21,10 +25,18 @@ namespace PTZCameraOperator.Views
         private readonly OnvifPtzService _ptzService;
         private readonly OnvifDiscoveryService _discoveryService;
         private readonly CameraDiagnosticService _diagnosticService;
+        private readonly CameraIdentificationService _identificationService;
         private readonly CameraSettings _settings;
-        private VideoWindow? _videoWindow;
+        private DiagnosticWindow? _diagnosticWindow;
+        private Models.CameraInfo? _currentCameraInfo;
         private CancellationTokenSource? _ptzMoveCts;
         private CancellationTokenSource? _discoveryCts;
+        private CancellationTokenSource? _autoDetectCts;
+        
+        // Video streaming
+        private bool _libVlcInitialized = false;
+        private LibVLC? _libVLC;
+        private LibVLCSharp.Shared.MediaPlayer? _mediaPlayer;
 
         public MainWindow()
         {
@@ -40,6 +52,16 @@ namespace PTZCameraOperator.Views
 
             _diagnosticService = new CameraDiagnosticService();
             _diagnosticService.DiagnosticMessage += DiagnosticService_DiagnosticMessage;
+            
+            _identificationService = new CameraIdentificationService();
+            _identificationService.StatusChanged += (s, msg) => 
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    EnsureDiagnosticWindow();
+                    _diagnosticWindow?.AppendDiagnosticMessage($"[{DateTime.Now:HH:mm:ss}] {msg}");
+                });
+            };
 
             _settings = CameraSettings.Load();
             LoadSettings();
@@ -48,6 +70,9 @@ namespace PTZCameraOperator.Views
             // Update speed labels when sliders change
             PanTiltSpeedSlider.ValueChanged += (s, e) => PanTiltSpeedLabel.Text = PanTiltSpeedSlider.Value.ToString("F1");
             ZoomSpeedSlider.ValueChanged += (s, e) => ZoomSpeedLabel.Text = ZoomSpeedSlider.Value.ToString("F1");
+            
+            // Initialize video
+            InitializeLibVLC();
 
             // Set focus to window for keyboard shortcuts and ensure it fits on screen
             this.Loaded += (s, e) =>
@@ -86,6 +111,34 @@ namespace PTZCameraOperator.Views
 
         private async void Window_KeyDown(object sender, KeyEventArgs e)
         {
+            // Handle fullscreen toggle (F11) - works regardless of connection
+            if (e.Key == Key.F11)
+            {
+                ToggleFullscreen();
+                e.Handled = true;
+                return;
+            }
+
+            // Handle preset shortcuts (Ctrl+1-9) - works even when not connected for UI feedback
+            if (e.KeyboardDevice.Modifiers == ModifierKeys.Control)
+            {
+                if (e.Key >= Key.D1 && e.Key <= Key.D9)
+                {
+                    int presetNumber = e.Key - Key.D0;
+                    if (_ptzService.IsConnected)
+                    {
+                        GoToPresetAsync(presetNumber);
+                    }
+                    else
+                    {
+                        MessageBox.Show($"❌ Cannot go to preset {presetNumber}\n\nNot connected to camera. Please connect first.", 
+                            "Go to Preset Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                    e.Handled = true;
+                    return;
+                }
+            }
+
             if (!_ptzService.IsConnected) return;
 
             if (_pressedKeys.Contains(e.Key)) return; // Already handling this key
@@ -122,8 +175,12 @@ namespace PTZCameraOperator.Views
                     zoomSpeed = -zoomSpeedValue;
                     break;
                 case Key.H:
+                    if (!_ptzService.IsConnected) 
+                    {
+                        UpdateStatus("❌ Cannot go to home - not connected", true);
+                        return;
+                    }
                     await _ptzService.GoToHomeAsync();
-                    UpdateStatus("Moving to home position...");
                     return;
                 default:
                     _pressedKeys.Remove(e.Key);
@@ -155,9 +212,9 @@ namespace PTZCameraOperator.Views
         private void LoadSettings()
         {
             HostTextBox.Text = _settings.Host;
-            PortTextBox.Text = _settings.Port.ToString();
+            PortTextBox.Text = _settings.Port > 0 ? _settings.Port.ToString() : "";
             UsernameTextBox.Text = _settings.Username;
-            PasswordBox.Password = !string.IsNullOrEmpty(_settings.Password) ? _settings.Password : "XTL.a1.1000!";
+            PasswordBox.Password = _settings.Password ?? "";
             PanTiltSpeedSlider.Value = _settings.PanSpeed;
             ZoomSpeedSlider.Value = _settings.ZoomSpeed;
         }
@@ -179,8 +236,135 @@ namespace PTZCameraOperator.Views
             ConnectionIndicator.Fill = new SolidColorBrush(connected ? Colors.Green : Colors.Red);
             ConnectionLabel.Text = connected ? "ONLINE" : "OFFLINE";
             UpdatePtzControlsEnabled(connected);
+            
+            // Update camera info display
+            if (connected && _currentCameraInfo != null)
+            {
+                var cameraName = _currentCameraInfo.GetDisplayName();
+                if (!string.IsNullOrEmpty(cameraName))
+                {
+                    CameraInfoLabel.Text = cameraName;
+                    CameraInfoLabel.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#f0a500")); // AccentGold
+                }
+                else
+                {
+                    CameraInfoLabel.Text = "Camera connected";
+                    CameraInfoLabel.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8b949e")); // TextMuted
+                }
+            }
+            else
+            {
+                CameraInfoLabel.Text = "No camera connected";
+                CameraInfoLabel.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#8b949e")); // TextMuted
+            }
         }
 
+        private void PresetButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.Tag is string presetStr && int.TryParse(presetStr, out int presetNumber))
+            {
+                GoToPresetAsync(presetNumber);
+            }
+        }
+        
+        private async void GoToPresetAsync(int presetNumber)
+        {
+            if (!_ptzService.IsConnected)
+            {
+                MessageBox.Show($"❌ Cannot go to preset {presetNumber}\n\nNot connected to camera. Please connect first.", 
+                    "Go to Preset Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            EnsureDiagnosticWindow();
+            _diagnosticWindow?.AppendDiagnosticMessage($"[{DateTime.Now:HH:mm:ss}] 🏠 Request to go to preset {presetNumber}...");
+            
+            var success = await _ptzService.GoToPresetAsync(presetNumber);
+            
+            Dispatcher.Invoke(() =>
+            {
+                EnsureDiagnosticWindow();
+                if (success)
+                {
+                    var msg = $"[{DateTime.Now:HH:mm:ss}] ✅ Camera moving to preset {presetNumber}!";
+                    _diagnosticWindow?.AppendDiagnosticMessage(msg);
+                    UpdateStatus($"✅ Moving to preset {presetNumber}!", false);
+                }
+                else
+                {
+                    var msg = $"[{DateTime.Now:HH:mm:ss}] ❌ Failed to go to preset {presetNumber}";
+                    _diagnosticWindow?.AppendDiagnosticMessage(msg);
+                    UpdateStatus($"❌ Failed to go to preset {presetNumber}", true);
+                }
+            });
+        }
+        
+        private void SetPresetButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (PresetSelectorComboBox.SelectedItem is System.Windows.Controls.ComboBoxItem item && 
+                item.Tag is string presetStr && int.TryParse(presetStr, out int presetNumber))
+            {
+                SetPresetAsync(presetNumber);
+            }
+            else
+            {
+                MessageBox.Show("Please select a preset number (1-9) from the dropdown.", 
+                    "No Preset Selected", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+        
+        private async void SetPresetAsync(int presetNumber)
+        {
+            if (!_ptzService.IsConnected)
+            {
+                MessageBox.Show($"❌ Cannot set preset {presetNumber}\n\nNot connected to camera. Please connect first.", 
+                    "Set Preset Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            EnsureDiagnosticWindow();
+            _diagnosticWindow?.AppendDiagnosticMessage($"[{DateTime.Now:HH:mm:ss}] ⚙️ Setting preset {presetNumber}...");
+            
+            var success = await _ptzService.SetPresetAsync(presetNumber);
+            
+            Dispatcher.Invoke(() =>
+            {
+                EnsureDiagnosticWindow();
+                if (success)
+                {
+                    var msg = $"[{DateTime.Now:HH:mm:ss}] ✅ ✅ ✅ PRESET {presetNumber} SET SUCCESSFULLY!";
+                    _diagnosticWindow?.AppendDiagnosticMessage("");
+                    _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    _diagnosticWindow?.AppendDiagnosticMessage(msg);
+                    _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    _diagnosticWindow?.AppendDiagnosticMessage("");
+                    
+                    MessageBox.Show($"✅ SUCCESS!\n\nPreset {presetNumber} has been saved successfully.\n\nYou can now use the preset {presetNumber} button to return to this position.", 
+                        "Preset Set", MessageBoxButton.OK, MessageBoxImage.Information);
+                    UpdateStatus($"✅ Preset {presetNumber} set successfully!", false);
+                }
+                else
+                {
+                    var msg = $"[{DateTime.Now:HH:mm:ss}] ❌ ❌ ❌ SET PRESET {presetNumber} FAILED!";
+                    _diagnosticWindow?.AppendDiagnosticMessage("");
+                    _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    _diagnosticWindow?.AppendDiagnosticMessage(msg);
+                    _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    _diagnosticWindow?.AppendDiagnosticMessage("");
+                    
+                    MessageBox.Show($"❌ FAILED\n\nCould not save preset {presetNumber}.\n\nThe camera may not support presets, or the command format is incorrect.\n\nCheck the diagnostic window for detailed error messages.", 
+                        "Set Preset Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                    UpdateStatus($"❌ Failed to set preset {presetNumber}", true);
+                }
+            });
+        }
+        
+        private void PresetSelectorComboBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            // Enable/disable SET button based on selection
+            // This is handled by IsEnabled binding in XAML
+        }
+        
         private void UpdatePtzControlsEnabled(bool enabled)
         {
             // Enable/disable all PTZ control buttons based on connection status
@@ -193,6 +377,24 @@ namespace PTZCameraOperator.Views
             HomeButton.IsEnabled = enabled;
             SetHomeButton.IsEnabled = enabled;
             
+            // Enable preset buttons
+            Preset1Button.IsEnabled = enabled;
+            Preset2Button.IsEnabled = enabled;
+            Preset3Button.IsEnabled = enabled;
+            Preset4Button.IsEnabled = enabled;
+            Preset5Button.IsEnabled = enabled;
+            Preset6Button.IsEnabled = enabled;
+            Preset7Button.IsEnabled = enabled;
+            Preset8Button.IsEnabled = enabled;
+            Preset9Button.IsEnabled = enabled;
+            PresetSelectorComboBox.IsEnabled = enabled;
+            
+            // Explicitly ensure SetHomeButton is enabled when connected
+            if (enabled)
+            {
+                System.Diagnostics.Debug.WriteLine($"PTZ controls enabled - SetHomeButton.IsEnabled = {SetHomeButton.IsEnabled}");
+            }
+            
             if (!enabled)
             {
                 UpdateStatus("PTZ controls disabled - connect to camera first", true);
@@ -201,10 +403,25 @@ namespace PTZCameraOperator.Views
 
         private void UpdateStatus(string message, bool isError = false)
         {
-            var timestamp = DateTime.Now.ToString("HH:mm:ss");
-            var prefix = isError ? "❌" : "ℹ️";
-            StatusText.Text += $"[{timestamp}] {prefix} {message}\n";
-            StatusText.ScrollToEnd();
+            // Log to debug output
+            System.Diagnostics.Debug.WriteLine($"[{DateTime.Now:HH:mm:ss}] {(isError ? "❌" : "ℹ️")} {message}");
+            
+            // Also show in diagnostic window if it's open, or open it automatically
+            Dispatcher.Invoke(() =>
+            {
+                EnsureDiagnosticWindow();
+                _diagnosticWindow?.AppendDiagnosticMessage($"[{DateTime.Now:HH:mm:ss}] {(isError ? "❌" : "ℹ️")} {message}");
+            });
+        }
+        
+        private void EnsureDiagnosticWindow()
+        {
+            if (_diagnosticWindow == null || !_diagnosticWindow.IsLoaded)
+            {
+                _diagnosticWindow = new DiagnosticWindow();
+                _diagnosticWindow.Closed += (s, args) => _diagnosticWindow = null;
+                _diagnosticWindow.Show();
+            }
         }
 
         private async void ConnectButton_Click(object sender, RoutedEventArgs e)
@@ -223,18 +440,83 @@ namespace PTZCameraOperator.Views
             var username = UsernameTextBox.Text;
             var password = PasswordBox.Password;
 
+            // First, identify the camera
+            EnsureDiagnosticWindow();
+            _diagnosticWindow?.AppendDiagnosticMessage("");
+            _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            _diagnosticWindow?.AppendDiagnosticMessage("🔍 CAMERA IDENTIFICATION");
+            _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            
+            _currentCameraInfo = await _identificationService.IdentifyCameraAsync(host, port, username, password);
+            
+            // Display discovered information
+            _diagnosticWindow?.AppendDiagnosticMessage("");
+            _diagnosticWindow?.AppendDiagnosticMessage("📋 DISCOVERED CAMERA INFORMATION:");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Manufacturer: {_currentCameraInfo.Manufacturer}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Model: {_currentCameraInfo.Model}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Firmware: {_currentCameraInfo.FirmwareVersion}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Serial: {_currentCameraInfo.SerialNumber}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Device Name: {_currentCameraInfo.DeviceName}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Supports ONVIF: {_currentCameraInfo.SupportsONVIF}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Supports PTZ: {_currentCameraInfo.SupportsPTZ}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Supports Presets: {_currentCameraInfo.SupportsPresets}");
+            _diagnosticWindow?.AppendDiagnosticMessage("");
+            _diagnosticWindow?.AppendDiagnosticMessage("🎯 RECOMMENDED INTERFACE:");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Interface: {_currentCameraInfo.RecommendedInterface}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Endpoint: {_currentCameraInfo.RecommendedEndpoint}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Protocol: {_currentCameraInfo.RecommendedProtocol}");
+            _diagnosticWindow?.AppendDiagnosticMessage($"   Port: {_currentCameraInfo.RecommendedPort}");
+            _diagnosticWindow?.AppendDiagnosticMessage("");
+            _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            _diagnosticWindow?.AppendDiagnosticMessage("");
+            
+            UpdateStatus($"Camera identified: {_currentCameraInfo.GetDisplayName()}");
+            UpdateStatus($"Using recommended interface: {_currentCameraInfo.RecommendedInterface}");
+
+            // Update camera info display immediately after identification
+            Dispatcher.Invoke(() =>
+            {
+                var cameraName = _currentCameraInfo.GetDisplayName();
+                if (!string.IsNullOrEmpty(cameraName))
+                {
+                    CameraInfoLabel.Text = $"{cameraName} (Identifying...)";
+                    CameraInfoLabel.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#58a6ff")); // AccentBlue
+                }
+            });
+
+            // Now connect using the recommended interface
             var connected = await _ptzService.ConnectAsync(host, port, username, password);
             
             if (connected)
             {
                 UpdateConnectionIndicator(true);
-                UpdateStatus("Connected successfully!");
+                UpdateStatus($"✅ Connected to {_currentCameraInfo.GetDisplayName()} via {_currentCameraInfo.RecommendedInterface}!");
                 SaveSettings();
+                
+                // Show camera info in diagnostic window
+                _diagnosticWindow?.AppendDiagnosticMessage($"✅ Successfully connected to {_currentCameraInfo.GetDisplayName()}");
+                _diagnosticWindow?.AppendDiagnosticMessage($"   Using interface: {_currentCameraInfo.RecommendedInterface}");
             }
             else
             {
                 UpdateConnectionIndicator(false);
                 UpdateStatus("Connection failed", true);
+                _diagnosticWindow?.AppendDiagnosticMessage("❌ Connection failed - check credentials and network");
+                
+                // Clear camera info on failure
+                Dispatcher.Invoke(() =>
+                {
+                    if (_currentCameraInfo != null)
+                    {
+                        CameraInfoLabel.Text = $"{_currentCameraInfo.GetDisplayName()} - Connection failed";
+                        CameraInfoLabel.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#f85149")); // AccentRed
+                    }
+                    else
+                    {
+                        CameraInfoLabel.Text = "Connection failed";
+                        CameraInfoLabel.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#f85149")); // AccentRed
+                    }
+                });
             }
 
             ConnectButton.IsEnabled = true;
@@ -265,17 +547,39 @@ namespace PTZCameraOperator.Views
             }
         }
 
-        private void OpenVideoWindowButton_Click(object sender, RoutedEventArgs e)
+        private bool _isFullscreen = false;
+        private WindowState _previousWindowState;
+        private WindowStyle _previousWindowStyle;
+        private bool _previousTopmost;
+
+        private void FullscreenButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_videoWindow == null || !_videoWindow.IsLoaded)
+            ToggleFullscreen();
+        }
+
+        private void ToggleFullscreen()
+        {
+            if (!_isFullscreen)
             {
-                _videoWindow = new VideoWindow(_ptzService);
-                _videoWindow.Closed += (s, args) => _videoWindow = null;
-                _videoWindow.Show();
+                // Enter fullscreen
+                _previousWindowState = WindowState;
+                _previousWindowStyle = WindowStyle;
+                _previousTopmost = Topmost;
+                
+                WindowStyle = WindowStyle.None;
+                WindowState = WindowState.Maximized;
+                Topmost = true;
+                _isFullscreen = true;
+                FullscreenButton.Content = "⛶ EXIT FULLSCREEN";
             }
             else
             {
-                _videoWindow.Activate();
+                // Exit fullscreen
+                WindowStyle = _previousWindowStyle;
+                WindowState = _previousWindowState;
+                Topmost = _previousTopmost;
+                _isFullscreen = false;
+                FullscreenButton.Content = "⛶ FULLSCREEN";
             }
         }
 
@@ -314,21 +618,39 @@ namespace PTZCameraOperator.Views
 
         private async void HomeButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!_ptzService.IsConnected) return;
+            if (!_ptzService.IsConnected)
+            {
+                MessageBox.Show("❌ Cannot go to home position\n\nNot connected to camera. Please connect first.", 
+                    "Go Home Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
             await _ptzService.GoToHomeAsync();
-            UpdateStatus("Moving to home position...");
         }
 
         private async void SetHomeButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!_ptzService.IsConnected) return;
+            if (!_ptzService.IsConnected)
+            {
+                UpdateStatus("❌ Cannot set home - not connected to camera", true);
+                MessageBox.Show("❌ Cannot set home position\n\nNot connected to camera. Please connect first.", 
+                    "Set Home Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
             await _ptzService.SetHomeAsync();
-            UpdateStatus("Home position set");
         }
 
         private void PtzService_StatusChanged(object? sender, string message)
         {
-            Dispatcher.Invoke(() => UpdateStatus(message));
+            // Status messages from PTZ service should be displayed prominently
+            Dispatcher.Invoke(() =>
+            {
+                // Ensure diagnostic window is open for status messages
+                EnsureDiagnosticWindow();
+                _diagnosticWindow?.AppendDiagnosticMessage($"[{DateTime.Now:HH:mm:ss}] {message}");
+                System.Diagnostics.Debug.WriteLine($"[{DateTime.Now:HH:mm:ss}] {message}");
+            });
         }
 
         private void PtzService_ErrorOccurred(object? sender, string error)
@@ -341,11 +663,212 @@ namespace PTZCameraOperator.Views
             Dispatcher.Invoke(() =>
             {
                 UpdateStatus($"Stream URL discovered: {streamUrl}");
-                if (_videoWindow != null && _videoWindow.IsLoaded)
+                StreamUrlTextBox.Text = streamUrl;
+                // Auto-start video if URL is discovered
+                _ = Task.Run(async () =>
                 {
-                    _videoWindow.SetStreamUrl(streamUrl);
-                }
+                    await Task.Delay(500); // Small delay to ensure UI is ready
+                    await Dispatcher.InvokeAsync(async () =>
+                    {
+                        await StartVideo(streamUrl);
+                    });
+                });
             });
+        }
+        
+        private void InitializeLibVLC()
+        {
+            try
+            {
+                if (_libVlcInitialized) return;
+
+                var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                var libVlcPaths = new[]
+                {
+                    Path.Combine(exeDir, "libvlc", "win-x64"),
+                    Path.Combine(exeDir, "runtimes", "win-x64", "native"),
+                    exeDir
+                };
+
+                string? libVlcPath = null;
+                foreach (var path in libVlcPaths)
+                {
+                    if (Directory.Exists(path))
+                    {
+                        var libvlcDll = Path.Combine(path, "libvlc.dll");
+                        if (File.Exists(libvlcDll))
+                        {
+                            libVlcPath = path;
+                            break;
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(libVlcPath))
+                {
+                    var libvlccoreDll = Path.Combine(libVlcPath, "libvlccore.dll");
+                    if (File.Exists(libvlccoreDll))
+                    {
+                        Core.Initialize(libVlcPath);
+                        _libVlcInitialized = true;
+                    }
+                }
+                else
+                {
+                    Core.Initialize();
+                    _libVlcInitialized = true;
+                }
+
+                if (_libVlcInitialized)
+                {
+                    _libVLC = new LibVLC(
+                        "--network-caching=1000",
+                        "--rtsp-tcp",
+                        "--rtsp-timeout=10"
+                    );
+                    _mediaPlayer = new LibVLCSharp.Shared.MediaPlayer(_libVLC);
+                    VideoView.MediaPlayer = _mediaPlayer;
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Failed to initialize LibVLC: {ex.Message}", true);
+            }
+        }
+        
+        private async void StartVideoButton_Click(object sender, RoutedEventArgs e)
+        {
+            var streamUrl = StreamUrlTextBox.Text.Trim();
+            if (string.IsNullOrEmpty(streamUrl))
+            {
+                MessageBox.Show("Please enter a stream URL or use Auto Detect.", "No Stream URL", 
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            await StartVideo(streamUrl);
+        }
+        
+        private async Task<bool> StartVideo(string streamUrl)
+        {
+            if (!_libVlcInitialized || _libVLC == null || _mediaPlayer == null)
+            {
+                MessageBox.Show("LibVLC not initialized. Video streaming unavailable.", 
+                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return false;
+            }
+
+            try
+            {
+                StartVideoButton.IsEnabled = false;
+                StopVideoButton.IsEnabled = true;
+                VideoPlaceholderText.Visibility = Visibility.Collapsed;
+                
+                var media = new Media(_libVLC, streamUrl, FromType.FromLocation);
+                _mediaPlayer.Play(media);
+                
+                UpdateStatus($"Starting video stream: {streamUrl}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Failed to start video: {ex.Message}", true);
+                StartVideoButton.IsEnabled = true;
+                StopVideoButton.IsEnabled = false;
+                VideoPlaceholderText.Visibility = Visibility.Visible;
+                return false;
+            }
+        }
+        
+        private void StopVideoButton_Click(object sender, RoutedEventArgs e)
+        {
+            StopVideo();
+        }
+        
+        private void StopVideo()
+        {
+            try
+            {
+                _mediaPlayer?.Stop();
+                StartVideoButton.IsEnabled = true;
+                StopVideoButton.IsEnabled = false;
+                VideoPlaceholderText.Visibility = Visibility.Visible;
+                UpdateStatus("Video stream stopped");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error stopping video: {ex.Message}", true);
+            }
+        }
+        
+        private async void AutoDetectStreamButton_Click(object sender, RoutedEventArgs e)
+        {
+            await TryAutoDetectStream();
+        }
+        
+        private async Task TryAutoDetectStream()
+        {
+            var host = HostTextBox.Text.Trim();
+            var username = UsernameTextBox.Text.Trim();
+            var password = PasswordBox.Password;
+            var encodedPassword = Uri.EscapeDataString(password);
+            var creds = !string.IsNullOrEmpty(username) ? $"{username}:{encodedPassword}@" : "";
+
+            var rtspPort = 554;
+            var urls = new[]
+            {
+                $"rtsp://{creds}{host}:{rtspPort}/11",  // Working format
+                $"rtsp://{creds}{host}:{rtspPort}/12",
+                $"rtsp://{creds}{host}:{rtspPort}/h264/ch1/main/av_stream",
+                $"rtsp://{creds}{host}:{rtspPort}/h264/ch1/sub/av_stream",
+                $"rtsp://{creds}{host}:{rtspPort}/live/main_stream",
+                $"rtsp://{creds}{host}:{rtspPort}/live/sub_stream",
+                $"rtsp://{creds}{host}:{rtspPort}/stream1",
+                $"rtsp://{creds}{host}:{rtspPort}/stream2",
+            };
+
+            _autoDetectCts?.Cancel();
+            _autoDetectCts = new CancellationTokenSource();
+            var token = _autoDetectCts.Token;
+
+            AutoDetectStreamButton.IsEnabled = false;
+            StartVideoButton.IsEnabled = false;
+
+            bool found = false;
+            for (int i = 0; i < urls.Length && !token.IsCancellationRequested; i++)
+            {
+                StreamUrlTextBox.Text = urls[i];
+                UpdateStatus($"Testing RTSP URL {i + 1}/{urls.Length}: {urls[i]}");
+                
+                if (await StartVideo(urls[i]))
+                {
+                    await Task.Delay(2000, token); // Wait 2 seconds to see if stream works
+                    if (_mediaPlayer?.IsPlaying == true)
+                    {
+                        found = true;
+                        UpdateStatus($"✓ Working RTSP URL found: {urls[i]}");
+                        break;
+                    }
+                    else
+                    {
+                        StopVideo();
+                    }
+                }
+                
+                if (!token.IsCancellationRequested && i < urls.Length - 1)
+                {
+                    await Task.Delay(500, token);
+                }
+            }
+
+            AutoDetectStreamButton.IsEnabled = true;
+            StartVideoButton.IsEnabled = true;
+
+            if (!found && !token.IsCancellationRequested)
+            {
+                MessageBox.Show("Auto-detect failed. Please enter stream URL manually.", 
+                    "Auto-Detect Failed", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
 
         private async void DiscoveryButton_Click(object sender, RoutedEventArgs e)
@@ -434,15 +957,25 @@ namespace PTZCameraOperator.Views
         private async void DiagnosticButton_Click(object sender, RoutedEventArgs e)
         {
             DiagnosticButton.IsEnabled = false;
-            UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            UpdateStatus("Starting comprehensive camera diagnostic...");
-            UpdateStatus("This will test all known camera APIs and connection methods");
-            UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            
+            // Open diagnostic window if not already open
+            if (_diagnosticWindow == null || !_diagnosticWindow.IsLoaded)
+            {
+                _diagnosticWindow = new DiagnosticWindow();
+                _diagnosticWindow.Closed += (s, args) => _diagnosticWindow = null;
+                _diagnosticWindow.Show();
+            }
+            
+            _diagnosticWindow.ClearDiagnostic();
+            _diagnosticWindow.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            _diagnosticWindow.AppendDiagnosticMessage("Starting comprehensive camera diagnostic...");
+            _diagnosticWindow.AppendDiagnosticMessage("This will test all known camera APIs and connection methods");
+            _diagnosticWindow.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
             var host = HostTextBox.Text;
             if (!int.TryParse(PortTextBox.Text, out int port))
             {
-                UpdateStatus("Invalid port number", true);
+                _diagnosticWindow.AppendDiagnosticMessage("❌ Invalid port number");
                 DiagnosticButton.IsEnabled = true;
                 return;
             }
@@ -454,37 +987,37 @@ namespace PTZCameraOperator.Views
             {
                 var results = await _diagnosticService.RunFullDiagnostic(host, port, username, password);
                 
-                UpdateStatus("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                UpdateStatus("DIAGNOSTIC RESULTS SUMMARY:");
-                UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+                _diagnosticWindow.AppendDiagnosticMessage("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                _diagnosticWindow.AppendDiagnosticMessage("DIAGNOSTIC RESULTS SUMMARY:");
+                _diagnosticWindow.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
                 foreach (var result in results)
                 {
                     var statusIcon = result.Value.Contains("SUCCESS") || result.Value.Contains("200 OK") ? "✓" : "✗";
-                    UpdateStatus($"{statusIcon} {result.Key}: {result.Value}");
+                    _diagnosticWindow?.AppendDiagnosticMessage($"{statusIcon} {result.Key}: {result.Value}");
                 }
 
                 // Check if we found any working endpoints
                 var workingEndpoints = results.Where(r => r.Value.Contains("SUCCESS") || r.Value.Contains("200 OK")).ToList();
                 if (workingEndpoints.Any())
                 {
-                    UpdateStatus("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                    UpdateStatus("✓ WORKING ENDPOINTS FOUND:");
-                    UpdateStatus("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    _diagnosticWindow?.AppendDiagnosticMessage("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    _diagnosticWindow?.AppendDiagnosticMessage("✓ WORKING ENDPOINTS FOUND:");
+                    _diagnosticWindow?.AppendDiagnosticMessage("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     foreach (var endpoint in workingEndpoints)
                     {
-                        UpdateStatus($"  ✓ {endpoint.Key}");
+                        _diagnosticWindow?.AppendDiagnosticMessage($"  ✓ {endpoint.Key}");
                     }
-                    UpdateStatus("\nThese endpoints can be used for camera control!");
+                    _diagnosticWindow?.AppendDiagnosticMessage("\nThese endpoints can be used for camera control!");
                 }
                 else
                 {
-                    UpdateStatus("\n⚠️ No working endpoints found. Check credentials and camera settings.", true);
+                    _diagnosticWindow?.AppendDiagnosticMessage("\n⚠️ No working endpoints found. Check credentials and camera settings.");
                 }
             }
             catch (Exception ex)
             {
-                UpdateStatus($"Diagnostic error: {ex.Message}", true);
+                _diagnosticWindow?.AppendDiagnosticMessage($"❌ Diagnostic error: {ex.Message}");
             }
             finally
             {
@@ -494,54 +1027,39 @@ namespace PTZCameraOperator.Views
 
         private void DiagnosticService_DiagnosticMessage(object? sender, string message)
         {
-            Dispatcher.Invoke(() => UpdateStatus(message));
-        }
-
-        private void CopyResultsButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
+            Dispatcher.Invoke(() =>
             {
-                var results = StatusText.Text;
-                if (string.IsNullOrWhiteSpace(results))
+                // Send diagnostic messages to the diagnostic window
+                if (_diagnosticWindow != null && _diagnosticWindow.IsLoaded)
                 {
-                    UpdateStatus("No results to copy", true);
-                    return;
+                    _diagnosticWindow.AppendDiagnosticMessage(message);
                 }
-
-                Clipboard.SetText(results);
-                UpdateStatus("✓ Results copied to clipboard!");
-                
-                // Show brief confirmation
-                var notification = new System.Windows.Controls.TextBlock
+                else
                 {
-                    Text = "✓ Copied to Clipboard!",
-                    Foreground = new SolidColorBrush(Colors.Green),
-                    FontSize = 11,
-                    Margin = new Thickness(0, 4, 0, 0),
-                    HorizontalAlignment = HorizontalAlignment.Center
-                };
-                
-                // You can paste the results anywhere (notepad, email, chat, etc.)
-                UpdateStatus("\nResults are now in your clipboard - you can paste them anywhere (Ctrl+V)");
-            }
-            catch (Exception ex)
-            {
-                UpdateStatus($"Failed to copy: {ex.Message}", true);
-            }
+                    // If diagnostic window not open, open it
+                    if (_diagnosticWindow == null || !_diagnosticWindow.IsLoaded)
+                    {
+                        _diagnosticWindow = new DiagnosticWindow();
+                        _diagnosticWindow.Closed += (s, args) => _diagnosticWindow = null;
+                        _diagnosticWindow.Show();
+                    }
+                    _diagnosticWindow.AppendDiagnosticMessage(message);
+                }
+            });
         }
 
-        private void ClearStatusButton_Click(object sender, RoutedEventArgs e)
-        {
-            StatusText.Text = "";
-            UpdateStatus("Status cleared.");
-        }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            StopVideo();
+            _mediaPlayer?.Dispose();
+            _libVLC?.Dispose();
             _ptzService?.Dispose();
             _discoveryService?.Dispose();
             _diagnosticService?.Dispose();
-            _videoWindow?.Close();
+            _identificationService?.Dispose();
+            _diagnosticWindow?.Close();
+            _autoDetectCts?.Cancel();
             SaveSettings();
         }
     }

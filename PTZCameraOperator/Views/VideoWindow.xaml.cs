@@ -236,17 +236,33 @@ namespace PTZCameraOperator.Views
             var rtspPort = 554; // Default RTSP port
             var urls = new[]
             {
+                // ONVIF formats
                 $"rtsp://{creds}{hostIp}:{rtspPort}/onvif1",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/onvif2",
+                // Hikvision/Dahua formats
                 $"rtsp://{creds}{hostIp}:{rtspPort}/Streaming/Channels/101",
                 $"rtsp://{creds}{hostIp}:{rtspPort}/Streaming/Channels/102",
                 $"rtsp://{creds}{hostIp}:{rtspPort}/cam/realmonitor?channel=1&subtype=0",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/cam/realmonitor?channel=1&subtype=1",
+                // HiSilicon formats (most common)
                 $"rtsp://{creds}{hostIp}:{rtspPort}/h264/ch1/main/av_stream",
-                $"rtsp://{creds}{hostIp}:{rtspPort}/stream1",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/h264/ch1/sub/av_stream",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/h264/ch1/av_stream",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/ch1/main/av_stream",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/ch1/sub/av_stream",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/live/main_stream",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/live/sub_stream",
                 $"rtsp://{creds}{hostIp}:{rtspPort}/live",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/stream1",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/stream2",
+                $"rtsp://{creds}{hostIp}:{rtspPort}/11",  // Channel 1, Stream 1
+                $"rtsp://{creds}{hostIp}:{rtspPort}/12",  // Channel 1, Stream 2
                 $"rtsp://{creds}{hostIp}:{rtspPort}/",
-                // Also try alternative RTSP ports
+                // Alternative RTSP ports
                 $"rtsp://{creds}{hostIp}:8554/onvif1",
                 $"rtsp://{creds}{hostIp}:8554/Streaming/Channels/101",
+                $"rtsp://{creds}{hostIp}:8554/h264/ch1/main/av_stream",
+                $"rtsp://{creds}{hostIp}:8554/live",
             };
 
             _autoDetectCts?.Cancel();

@@ -26,6 +26,9 @@ namespace PTZCameraOperator.Services
         private bool _useDigestAuth = false; // Whether to use Digest Authentication instead of Basic
         private string? _connectedEndpointType = null; // Track what type of endpoint we connected to: "ONVIF", "HiSilicon", "Hikvision", "Dahua", etc.
         
+        // Preset position storage (for coordinate-based recall workaround)
+        private readonly Dictionary<int, (float Pan, float Tilt, float Zoom)> _presetPositions = new Dictionary<int, (float Pan, float Tilt, float Zoom)>();
+        
         public bool IsConnected { get; private set; }
         
         // Public properties for accessing connection info (used by VideoWindow for stream URL generation)
@@ -364,8 +367,8 @@ namespace PTZCameraOperator.Services
                                     var encodedPassword = Uri.EscapeDataString(_password);
                                     var creds = !string.IsNullOrEmpty(_username) ? $"{_username}:{encodedPassword}@" : "";
                                     
-                                    // Try common HiSilicon RTSP formats
-                                    var defaultRtspUrl = $"rtsp://{creds}{host}:554/Streaming/Channels/101";
+                                    // Use the working RTSP format for this camera (/11 = channel 1, stream 1)
+                                    var defaultRtspUrl = $"rtsp://{creds}{host}:554/11";
                                     
                                     // Fire event in background to update UI
                                     _ = Task.Run(() =>
@@ -742,32 +745,42 @@ namespace PTZCameraOperator.Services
         /// CGI endpoints don't use SOAP - they use GET requests with query parameters
         /// </summary>
         /// <param name="endpointUrl">Full URL of the CGI endpoint (e.g., http://192.168.1.12:80/cgi-bin/magicBox.cgi?action=getDeviceType)</param>
+        /// <summary>
+        /// Test CGI endpoint with retry logic for network reliability
+        /// Retries transient failures (timeouts, network errors) up to 2 times
+        /// </summary>
+        /// <param name="endpointUrl">Full URL to test</param>
         /// <param name="username">Username for Basic Auth</param>
         /// <param name="password">Password for Basic Auth</param>
+        /// <param name="maxRetries">Maximum number of retries for transient failures (default 2)</param>
         /// <returns>Tuple containing response (null if failed), HTTP status code, and error message</returns>
-        private async Task<(string? response, int? statusCode, string? errorMessage)> TestCgiEndpointAsync(string endpointUrl, string username, string password)
+        private async Task<(string? response, int? statusCode, string? errorMessage)> TestCgiEndpointAsync(string endpointUrl, string username, string password, int maxRetries = 2)
         {
-            try
+            int retryCount = 0;
+            
+            while (retryCount <= maxRetries)
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, endpointUrl);
-                
-                // Add Basic Authentication header
-                if (!string.IsNullOrEmpty(username))
+                try
                 {
-                    var authValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
-                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authValue);
-                }
-                
-                var response = await _httpClient.SendAsync(request);
-                var responseText = await response.Content.ReadAsStringAsync();
-                
-                if (response.IsSuccessStatusCode)
-                {
-                    // Success! Return the response text
-                    return (responseText, (int)response.StatusCode, null);
-                }
-                else
-                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, endpointUrl);
+                    
+                    // Add Basic Authentication header
+                    if (!string.IsNullOrEmpty(username))
+                    {
+                        var authValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
+                        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", authValue);
+                    }
+                    
+                    var response = await _httpClient.SendAsync(request);
+                    var responseText = await response.Content.ReadAsStringAsync();
+                    
+                    if (response.IsSuccessStatusCode)
+                    {
+                        // Success! Return the response text
+                        return (responseText, (int)response.StatusCode, null);
+                    }
+                    else
+                    {
                     // Check for authentication requirement from WWW-Authenticate header
                     var authHeaders = response.Headers.WwwAuthenticate.ToList();
                     string? errorMsg = $"HTTP {response.StatusCode} - {response.ReasonPhrase}";
@@ -813,20 +826,39 @@ namespace PTZCameraOperator.Services
                     }
                     
                     return (null, (int)response.StatusCode, errorMsg);
+                    }
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    // Network errors - retry if we haven't exceeded max retries
+                    if (retryCount < maxRetries)
+                    {
+                        retryCount++;
+                        await Task.Delay(500 * retryCount); // Exponential backoff: 500ms, 1000ms
+                        continue;
+                    }
+                    return (null, null, $"Network error (after {retryCount} retries): {httpEx.Message}");
+                }
+                catch (TaskCanceledException)
+                {
+                    // Timeouts - retry if we haven't exceeded max retries
+                    if (retryCount < maxRetries)
+                    {
+                        retryCount++;
+                        await Task.Delay(500 * retryCount); // Exponential backoff
+                        continue;
+                    }
+                    return (null, null, $"Request timeout (after {retryCount} retries)");
+                }
+                catch (Exception ex)
+                {
+                    // Other errors - don't retry
+                    return (null, null, $"Request failed: {ex.Message}");
                 }
             }
-            catch (HttpRequestException httpEx)
-            {
-                return (null, null, $"Network error: {httpEx.Message}");
-            }
-            catch (TaskCanceledException)
-            {
-                return (null, null, "Request timeout");
-            }
-            catch (Exception ex)
-            {
-                return (null, null, $"Request failed: {ex.Message}");
-            }
+            
+            // Should never reach here, but handle just in case
+            return (null, null, "Request failed after all retries");
         }
 
         public void Disconnect()
@@ -1006,6 +1038,140 @@ namespace PTZCameraOperator.Services
                 return false;
             }
         }
+        
+        /// <summary>
+        /// HiSilicon Hi3510 get current position
+        /// Tries multiple command formats to query pan/tilt/zoom values
+        /// Note: Many HiSilicon cameras don't support position querying via CGI
+        /// This method attempts common formats but may return null if not supported
+        /// </summary>
+        private async Task<(float Pan, float Tilt, float Zoom)?> HiSiliconGetPosition()
+        {
+            if (string.IsNullOrEmpty(_baseUrl))
+            {
+                System.Diagnostics.Debug.WriteLine("HiSiliconGetPosition: _baseUrl is empty");
+                return null;
+            }
+            
+            try
+            {
+                // Try different position query formats
+                var formats = new[]
+                {
+                    "?action=getstatus",
+                    "?-act=getstatus",
+                    "?action=getpos",
+                    "?-act=getpos",
+                    "?action=getptz",
+                    "?-act=getptz",
+                    "?action=status",
+                    "?-act=status"
+                };
+                
+                foreach (var query in formats)
+                {
+                    var url = $"{_baseUrl}/ptzctrl.cgi{query}";
+                    var (response, statusCode, _) = await TestCgiEndpointAsync(url, _username, _password);
+                    
+                    if (statusCode.HasValue && statusCode.Value == 200 && !string.IsNullOrEmpty(response))
+                    {
+                        // Try to parse position from response
+                        // Format varies by camera - common formats include:
+                        // "pan=0.5&tilt=0.3&zoom=0.7"
+                        // "Pan:0.5 Tilt:0.3 Zoom:0.7"
+                        // JSON or XML formats
+                        
+                        try
+                        {
+                            // Try simple key=value format
+                            var panMatch = Regex.Match(response, @"pan[=:](-?\d+\.?\d*)", RegexOptions.IgnoreCase);
+                            var tiltMatch = Regex.Match(response, @"tilt[=:](-?\d+\.?\d*)", RegexOptions.IgnoreCase);
+                            var zoomMatch = Regex.Match(response, @"zoom[=:](-?\d+\.?\d*)", RegexOptions.IgnoreCase);
+                            
+                            if (panMatch.Success && tiltMatch.Success && zoomMatch.Success)
+                            {
+                                float pan = float.Parse(panMatch.Groups[1].Value);
+                                float tilt = float.Parse(tiltMatch.Groups[1].Value);
+                                float zoom = float.Parse(zoomMatch.Groups[1].Value);
+                                
+                                System.Diagnostics.Debug.WriteLine($"HiSiliconGetPosition: Parsed P={pan} T={tilt} Z={zoom} from {query}");
+                                return (pan, tilt, zoom);
+                            }
+                        }
+                        catch (Exception parseEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"HiSiliconGetPosition: Failed to parse position from response: {parseEx.Message}");
+                        }
+                    }
+                }
+                
+                System.Diagnostics.Debug.WriteLine("HiSiliconGetPosition: No position query format worked - camera may not support position querying");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"HiSiliconGetPosition error: {ex.Message}");
+                return null;
+            }
+        }
+        
+        /// <summary>
+        /// HiSilicon Hi3510 absolute positioning (goto specific pan/tilt/zoom)
+        /// Tries multiple command formats to move to absolute position
+        /// Note: Many HiSilicon cameras don't support absolute positioning via CGI
+        /// This method attempts common formats but may fail if not supported
+        /// </summary>
+        private async Task<bool> HiSiliconAbsoluteMove(float pan, float tilt, float zoom)
+        {
+            if (string.IsNullOrEmpty(_baseUrl))
+            {
+                StatusChanged?.Invoke(this, "❌ Cannot move to position: Base URL is not set.");
+                return false;
+            }
+            
+            try
+            {
+                // HiSilicon cameras typically don't support direct absolute positioning via CGI
+                // Instead, we can try to use preset-based positioning or movement commands
+                // For now, we'll try common absolute positioning formats
+                
+                var formats = new[]
+                {
+                    // Format: -act=goto&pan=X&tilt=Y&zoom=Z
+                    $"-act=goto&pan={pan:F2}&tilt={tilt:F2}&zoom={zoom:F2}",
+                    // Format: -act=absmove&pan=X&tilt=Y&zoom=Z
+                    $"-act=absmove&pan={pan:F2}&tilt={tilt:F2}&zoom={zoom:F2}",
+                    // Format: -act=position&pan=X&tilt=Y&zoom=Z
+                    $"-act=position&pan={pan:F2}&tilt={tilt:F2}&zoom={zoom:F2}",
+                    // Format with step parameter
+                    $"-step=0&-act=goto&pan={pan:F2}&tilt={tilt:F2}&zoom={zoom:F2}"
+                };
+                
+                foreach (var format in formats)
+                {
+                    var url = $"{_baseUrl}/ptzctrl.cgi?{format}";
+                    var (response, statusCode, _) = await TestCgiEndpointAsync(url, _username, _password);
+                    
+                    if (statusCode.HasValue && statusCode.Value == 200)
+                    {
+                        StatusChanged?.Invoke(this, $"✅ Moving to position: P:{pan:F2} T:{tilt:F2} Z:{zoom:F2}");
+                        System.Diagnostics.Debug.WriteLine($"HiSiliconAbsoluteMove: Success with format: {format}");
+                        return true;
+                    }
+                }
+                
+                // If direct absolute positioning doesn't work, try using preset recall if we have stored coordinates
+                StatusChanged?.Invoke(this, "⚠️ Direct absolute positioning not supported - camera may need preset-based positioning");
+                System.Diagnostics.Debug.WriteLine("HiSiliconAbsoluteMove: All formats failed - camera may not support absolute positioning");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"HiSiliconAbsoluteMove error: {ex.Message}");
+                StatusChanged?.Invoke(this, $"❌ Error moving to position: {ex.Message}");
+                return false;
+            }
+        }
 
         /// <summary>
         /// Moves camera to an absolute position
@@ -1024,6 +1190,12 @@ namespace PTZCameraOperator.Services
         public async Task<bool> AbsoluteMoveAsync(float pan, float tilt, float zoom)
         {
             if (!IsConnected) return false;
+            
+            // Route to manufacturer-specific method if needed
+            if (_connectedEndpointType == "HiSilicon")
+            {
+                return await HiSiliconAbsoluteMove(pan, tilt, zoom);
+            }
             
             try
             {
@@ -1053,6 +1225,12 @@ namespace PTZCameraOperator.Services
         public async Task<(float Pan, float Tilt, float Zoom)?> GetPositionAsync()
         {
             if (!IsConnected) return null;
+            
+            // Route to manufacturer-specific method if needed
+            if (_connectedEndpointType == "HiSilicon")
+            {
+                return await HiSiliconGetPosition();
+            }
             
             try
             {
@@ -1092,13 +1270,312 @@ namespace PTZCameraOperator.Services
 
         public async Task<bool> GoToHomeAsync()
         {
+            return await GoToPresetAsync(0);
+        }
+        
+        /// <summary>
+        /// Goes to a preset position (0-9)
+        /// Preset 0 is the "home" position
+        /// </summary>
+        public async Task<bool> GoToPresetAsync(int presetNumber)
+        {
             if (!IsConnected) return false;
+            
+            if (presetNumber < 0 || presetNumber > 9)
+            {
+                StatusChanged?.Invoke(this, $"❌ Invalid preset number: {presetNumber}. Must be 0-9.");
+                return false;
+            }
+            
+            StatusChanged?.Invoke(this, $"🏠 Sending go to preset {presetNumber} command...");
+            System.Diagnostics.Debug.WriteLine($"GoToPresetAsync({presetNumber}): _connectedEndpointType = '{_connectedEndpointType}', _baseUrl = '{_baseUrl}'");
+            
+            // Route to appropriate method based on camera type
+            if (_connectedEndpointType == "HiSilicon")
+            {
+                System.Diagnostics.Debug.WriteLine($"GoToPresetAsync: Routing to HiSiliconGoToPreset({presetNumber})");
+                return await HiSiliconGoToPreset(presetNumber);
+            }
+            
+            // Standard ONVIF GotoPreset
+            try
+            {
+                var request = presetNumber == 0 ? CreateGoToHomeRequest() : CreateGoToPresetRequest(presetNumber);
+                var (response, _, _) = await SendRequestAsync(request);
+                
+                if (response != null)
+                {
+                    StatusChanged?.Invoke(this, $"✅ Go to preset {presetNumber} command sent successfully - Camera is moving to preset position");
+                    return true;
+                }
+                else
+                {
+                    StatusChanged?.Invoke(this, $"❌ Failed to send go to preset {presetNumber} command");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke(this, $"❌ Go to preset {presetNumber} error: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// HiSilicon Hi3510 go to preset position command
+        /// Tries multiple command formats as different HiSilicon cameras use different syntax
+        /// The response "[Succeed]set ok." suggests "goto" might be interpreted as "set", so we try many variations
+        /// </summary>
+        private async Task<bool> HiSiliconGoToPreset(int presetNumber)
+        {
+            if (presetNumber == 0)
+            {
+                return await HiSiliconGoToHome();
+            }
+            
+            // For presets 1-9, try preset recall first, then coordinate-based recall
+            if (string.IsNullOrEmpty(_baseUrl))
+            {
+                StatusChanged?.Invoke(this, $"❌ Cannot go to preset {presetNumber}: Base URL is not set.");
+                return false;
+            }
             
             try
             {
-                var request = CreateGoToHomeRequest();
+                var formats = new[]
+                {
+                    ("gotopreset", "preset", presetNumber.ToString(), true),
+                    ("callpreset", "preset", presetNumber.ToString(), true),
+                    ("goto", "preset", presetNumber.ToString(), true),
+                };
+                
+                foreach (var (action, paramName, preset, useStep) in formats)
+                {
+                    var stepParam = useStep ? "-step=0&" : "";
+                    var url = $"{_baseUrl}/ptzctrl.cgi?{stepParam}-act={action}&{paramName}={preset}";
+                    var (response, statusCode, _) = await TestCgiEndpointAsync(url, _username, _password);
+                    
+                    if (statusCode.HasValue && statusCode.Value == 200)
+                    {
+                        var responseUpper = response?.ToUpperInvariant() ?? "";
+                        if (!responseUpper.Contains("SET") || responseUpper.Contains("GOTO") || responseUpper.Contains("CALL"))
+                        {
+                            StatusChanged?.Invoke(this, $"✅ Go to preset {presetNumber} command sent successfully");
+                            return true;
+                        }
+                    }
+                }
+                
+                // Try coordinate-based recall if preset recall failed
+                if (_presetPositions.TryGetValue(presetNumber, out var storedPosition))
+                {
+                    StatusChanged?.Invoke(this, $"🔄 Preset recall failed - attempting coordinate-based recall for preset {presetNumber}...");
+                    var moved = await HiSiliconAbsoluteMove(storedPosition.Pan, storedPosition.Tilt, storedPosition.Zoom);
+                    if (moved)
+                    {
+                        StatusChanged?.Invoke(this, $"✅ Coordinate-based recall successful for preset {presetNumber}");
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+            catch (Exception ex)
+            {
+                StatusChanged?.Invoke(this, $"❌ Go to preset {presetNumber} error: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// HiSilicon Hi3510 go to home position command (preset 0)
+        /// Uses preset 0 as the home position
+        /// Tries multiple command formats as different HiSilicon cameras use different syntax
+        /// The response "[Succeed]set ok." suggests "goto" might be interpreted as "set", so we try many variations
+        /// </summary>
+        private async Task<bool> HiSiliconGoToHome()
+        {
+            try
+            {
+                // Ensure _baseUrl is set correctly
+                if (string.IsNullOrEmpty(_baseUrl))
+                {
+                    var errorMsg = "❌ Cannot go to home: Base URL is not set. Camera may not be connected via HiSilicon endpoint.";
+                    StatusChanged?.Invoke(this, errorMsg);
+                    System.Diagnostics.Debug.WriteLine(errorMsg);
+                    return false;
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"HiSiliconGoToHome: _baseUrl = '{_baseUrl}', Host = '{Host}', Port = {Port}");
+                
+                // Try different command formats for going to preset
+                // Note: Some cameras return "[Succeed]set ok." even for goto commands, so we check response content
+                // Try both action-based and parameter-based formats, and different URL structures
+                var formats = new[]
+                {
+                    // Explicit goto actions with preset parameter
+                    ("gotopreset", "preset", "0", true),     // -act=gotopreset&preset=0 (with -step)
+                    ("gotopreset", "preset", "0", false),    // -act=gotopreset&preset=0 (without -step)
+                    ("gotopreset", "id", "0", true),         // -act=gotopreset&id=0 (with -step)
+                    ("gotopreset", "id", "0", false),        // -act=gotopreset&id=0 (without -step)
+                    ("gotopreset", "preset", "1", true),     // Alternative preset number
+                    
+                    // Call preset variations
+                    ("callpreset", "preset", "0", true),     // -act=callpreset&preset=0
+                    ("callpreset", "preset", "0", false),    // -act=callpreset&preset=0 (without -step)
+                    ("callpreset", "id", "0", true),         // -act=callpreset&id=0
+                    ("callpreset", "id", "0", false),        // -act=callpreset&id=0 (without -step)
+                    
+                    // Simple goto variations
+                    ("goto", "preset", "0", true),           // -act=goto&preset=0
+                    ("goto", "preset", "0", false),          // -act=goto&preset=0 (without -step)
+                    ("goto", "id", "0", true),               // -act=goto&id=0
+                    ("goto", "id", "0", false),              // -act=goto&id=0 (without -step)
+                    
+                    // Move to preset variations
+                    ("movetopreset", "preset", "0", true),   // -act=movetopreset&preset=0
+                    ("movetopreset", "id", "0", true),       // -act=movetopreset&id=0
+                    
+                    // Load preset variations
+                    ("loadpreset", "preset", "0", true),     // -act=loadpreset&preset=0
+                    ("loadpreset", "id", "0", true),         // -act=loadpreset&id=0
+                };
+                
+                foreach (var (action, paramName, preset, useStep) in formats)
+                {
+                    var stepParam = useStep ? "-step=0&" : "";
+                    StatusChanged?.Invoke(this, $"🔄 Trying to go to preset {preset} with action '{action}' and parameter '{paramName}' (step={useStep})...");
+                    
+                    var url = $"{_baseUrl}/ptzctrl.cgi?{stepParam}-act={action}&{paramName}={preset}";
+                    var (response, statusCode, errorMessage) = await TestCgiEndpointAsync(url, _username, _password);
+                    
+                    // Log response for debugging
+                    var responsePreview = response != null ? response.Substring(0, Math.Min(response.Length, 200)) : "(null)";
+                    System.Diagnostics.Debug.WriteLine($"HiSilicon GoToHome response (preset {preset}, action {action}): Status={statusCode}, Response={responsePreview}");
+                    
+                    if (statusCode.HasValue && statusCode.Value == 200)
+                    {
+                        // Check if response indicates it was treated as a "set" command
+                        var responseUpper = response?.ToUpperInvariant() ?? "";
+                        var responseTrimmed = response?.Trim() ?? "";
+                        
+                        // Check if response indicates it was treated as a "set" command
+                        // If the response says "set ok" for a goto command, it might actually be setting instead of going
+                        bool looksLikeSet = responseUpper.Contains("SET") && 
+                                          !responseUpper.Contains("GOTO") && 
+                                          !responseUpper.Contains("CALL") &&
+                                          !responseUpper.Contains("MOVE") &&
+                                          !responseUpper.Contains("POSITION");
+                        
+                        // If response says "set" for ANY goto action (including "gotopreset", "movetopreset", "callpreset"), continue to try more formats
+                        // This is because some cameras incorrectly interpret commands or use the wrong response
+                        // ALL goto actions should be rejected if response says "set" - this camera may not support goto preset
+                        if (looksLikeSet && (action == "goto" || action == "preset" || action == "gotopreset" || action == "callpreset" || action == "movetopreset" || action == "loadpreset"))
+                        {
+                            // Response suggests it was treated as "set" - try next format
+                            StatusChanged?.Invoke(this, $"⚠️ Response suggests 'set' instead of 'goto': {responseTrimmed} (action: {action}) - Trying next format...");
+                            System.Diagnostics.Debug.WriteLine($"Warning: Action '{action}' may have been interpreted as 'set' instead of 'goto' - response: {responseTrimmed}");
+                            continue; // Try next format - don't accept this as success
+                        }
+                        
+                        // Response doesn't look like "set" OR it contains goto/call/move keywords - accept as success
+                        var successMsg = $"✅ Go to home command sent successfully - Camera returning to home position (preset {preset}, action: {action}, param: {paramName})";
+                        if (!string.IsNullOrEmpty(response))
+                        {
+                            successMsg += $"\nDevice response: {responseTrimmed}";
+                        }
+                        StatusChanged?.Invoke(this, successMsg);
+                        System.Diagnostics.Debug.WriteLine($"HiSilicon GoToHome succeeded with: {action}&{paramName}={preset}");
+                        return true;
+                    }
+                    else
+                    {
+                        StatusChanged?.Invoke(this, $"❌ Preset {preset} with action '{action}' and param '{paramName}' failed: HTTP {statusCode}");
+                        System.Diagnostics.Debug.WriteLine($"HiSilicon GoToHome failed for preset {preset} with action {action} and param {paramName}: Status={statusCode}");
+                    }
+                }
+                
+                // If preset recall failed, try coordinate-based recall using stored position
+                if (_presetPositions.TryGetValue(0, out var storedPosition))
+                {
+                    StatusChanged?.Invoke(this, "🔄 Preset recall failed - attempting coordinate-based recall using stored position...");
+                    StatusChanged?.Invoke(this, $"📍 Using stored position: Pan={storedPosition.Pan:F2}, Tilt={storedPosition.Tilt:F2}, Zoom={storedPosition.Zoom:F2}");
+                    
+                    // Try absolute positioning to move to stored coordinates
+                    var moved = await HiSiliconAbsoluteMove(storedPosition.Pan, storedPosition.Tilt, storedPosition.Zoom);
+                    if (moved)
+                    {
+                        StatusChanged?.Invoke(this, "✅ Coordinate-based recall successful - Camera moving to stored home position!");
+                        System.Diagnostics.Debug.WriteLine($"HiSilicon GoToHome: Coordinate-based recall succeeded for preset 0");
+                        return true;
+                    }
+                    else
+                    {
+                        StatusChanged?.Invoke(this, "⚠️ Coordinate-based recall also failed - camera may not support absolute positioning");
+                    }
+                }
+                else
+                {
+                    StatusChanged?.Invoke(this, "⚠️ No stored position available for coordinate-based recall - position was not queried when preset was saved");
+                }
+                
+                var failureMsg = "❌ Failed to go to home position - All goto preset commands returned 'set ok' response.";
+                failureMsg += "\n⚠️ This camera may not support 'goto preset' via CGI, or uses a different command format.";
+                if (_presetPositions.ContainsKey(0))
+                {
+                    failureMsg += "\n⚠️ Coordinate-based recall also failed - camera may not support absolute positioning.";
+                }
+                else
+                {
+                    failureMsg += "\n💡 Try setting home again - the position will be queried and stored for coordinate-based recall.";
+                }
+                StatusChanged?.Invoke(this, failureMsg);
+                System.Diagnostics.Debug.WriteLine("HiSilicon GoToHome: All preset formats and coordinate-based recall failed");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"HiSilicon GoToHome error: {ex.Message}");
+                StatusChanged?.Invoke(this, $"❌ GoToHome error: {ex.Message}");
+                return false;
+            }
+        }
+
+        public async Task<bool> SetHomeAsync()
+        {
+            return await SetPresetAsync(0);
+        }
+        
+        /// <summary>
+        /// Sets a preset position (0-9)
+        /// Preset 0 is the "home" position
+        /// </summary>
+        public async Task<bool> SetPresetAsync(int presetNumber)
+        {
+            if (!IsConnected) return false;
+            
+            if (presetNumber < 0 || presetNumber > 9)
+            {
+                StatusChanged?.Invoke(this, $"❌ Invalid preset number: {presetNumber}. Must be 0-9.");
+                return false;
+            }
+            
+            StatusChanged?.Invoke(this, $"⚙️ Setting preset {presetNumber}...");
+            System.Diagnostics.Debug.WriteLine($"SetPresetAsync({presetNumber}): _connectedEndpointType = '{_connectedEndpointType}', _baseUrl = '{_baseUrl}'");
+            
+            // Route to appropriate method based on camera type
+            if (_connectedEndpointType == "HiSilicon")
+            {
+                System.Diagnostics.Debug.WriteLine($"SetPresetAsync: Routing to HiSiliconSetPreset({presetNumber})");
+                return await HiSiliconSetPreset(presetNumber);
+            }
+            
+            // Standard ONVIF SetPreset
+            try
+            {
+                var request = presetNumber == 0 ? CreateSetHomeRequest() : CreateSetPresetRequest(presetNumber);
                 var (response, _, _) = await SendRequestAsync(request);
-                StatusChanged?.Invoke(this, "Moving to home position");
+                StatusChanged?.Invoke(this, $"Preset {presetNumber} set");
                 return response != null;
             }
             catch
@@ -1106,20 +1583,202 @@ namespace PTZCameraOperator.Services
                 return false;
             }
         }
-
-        public async Task<bool> SetHomeAsync()
+        
+        /// <summary>
+        /// HiSilicon Hi3510 set preset position command
+        /// Tries multiple command formats as different HiSilicon cameras use different syntax
+        /// Parses response from device to confirm success
+        /// </summary>
+        private async Task<bool> HiSiliconSetPreset(int presetNumber)
         {
-            if (!IsConnected) return false;
+            if (presetNumber == 0)
+            {
+                return await HiSiliconSetHome();
+            }
+            
+            // For presets 1-9, use the same logic as preset 0 but with different preset number
+            StatusChanged?.Invoke(this, $"⏳ Attempting to set preset {presetNumber}...");
             
             try
             {
-                var request = CreateSetHomeRequest();
-                var (response, _, _) = await SendRequestAsync(request);
-                StatusChanged?.Invoke(this, "Home position set");
-                return response != null;
+                if (string.IsNullOrEmpty(_baseUrl))
+                {
+                    var errorMsg = $"❌ Cannot set preset {presetNumber}: Base URL is not set.";
+                    StatusChanged?.Invoke(this, errorMsg);
+                    return false;
+                }
+                
+                var formats = new[]
+                {
+                    ("setpreset", presetNumber.ToString()),
+                    ("preset", presetNumber.ToString()),
+                };
+                
+                foreach (var (action, preset) in formats)
+                {
+                    StatusChanged?.Invoke(this, $"🔄 Trying preset {preset} with action '{action}'...");
+                    
+                    var url = $"{_baseUrl}/ptzctrl.cgi?-step=0&-act={action}&preset={preset}";
+                    var (response, statusCode, errorMessage) = await TestCgiEndpointAsync(url, _username, _password);
+                    
+                    if (statusCode.HasValue && statusCode.Value == 200)
+                    {
+                        var currentPosition = await HiSiliconGetPosition();
+                        if (currentPosition.HasValue)
+                        {
+                            _presetPositions[presetNumber] = currentPosition.Value;
+                            StatusChanged?.Invoke(this, $"💾 Stored preset {presetNumber} position: Pan={currentPosition.Value.Pan:F2}, Tilt={currentPosition.Value.Tilt:F2}, Zoom={currentPosition.Value.Zoom:F2}");
+                        }
+                        
+                        StatusChanged?.Invoke(this, $"✅ Preset {presetNumber} set successfully");
+                        return true;
+                    }
+                }
+                
+                return false;
             }
-            catch
+            catch (Exception ex)
             {
+                StatusChanged?.Invoke(this, $"❌ Set preset {presetNumber} error: {ex.Message}");
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// HiSilicon Hi3510 set home position command (preset 0)
+        /// Uses preset 0 as the home position
+        /// Tries multiple command formats as different HiSilicon cameras use different syntax
+        /// Parses response from device to confirm success
+        /// </summary>
+        private async Task<bool> HiSiliconSetHome()
+        {
+            StatusChanged?.Invoke(this, "⏳ Attempting to set home position...");
+            
+            try
+            {
+                // Ensure _baseUrl is set correctly
+                if (string.IsNullOrEmpty(_baseUrl))
+                {
+                    var errorMsg = "❌ Cannot set home: Base URL is not set. Camera may not be connected via HiSilicon endpoint.";
+                    StatusChanged?.Invoke(this, errorMsg);
+                    System.Diagnostics.Debug.WriteLine(errorMsg);
+                    return false;
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"HiSiliconSetHome: _baseUrl = '{_baseUrl}', Host = '{Host}', Port = {Port}");
+                
+                // Try different command formats for setting preset
+                var formats = new[]
+                {
+                    ("setpreset", "0"),  // Most common: -act=setpreset&preset=0
+                    ("setpreset", "1"),  // Alternative preset number
+                    ("preset", "0"),     // Some cameras use: -act=preset&preset=0
+                    ("preset", "1"),     // Alternative preset number
+                };
+                
+                foreach (var (action, preset) in formats)
+                {
+                    StatusChanged?.Invoke(this, $"🔄 Trying preset {preset} with action '{action}'...");
+                    
+                    var url = $"{_baseUrl}/ptzctrl.cgi?-step=0&-act={action}&preset={preset}";
+                    var (response, statusCode, errorMessage) = await TestCgiEndpointAsync(url, _username, _password);
+                    
+                    // Log the full response for debugging
+                    var responsePreview = response != null ? response.Substring(0, Math.Min(response.Length, 200)) : "(null)";
+                    System.Diagnostics.Debug.WriteLine($"HiSilicon SetHome response (preset {preset}): Status={statusCode}, Response={responsePreview}");
+                    StatusChanged?.Invoke(this, $"📡 Device response: HTTP {statusCode} - Response: {responsePreview}");
+                    
+                    if (statusCode.HasValue && statusCode.Value == 200)
+                    {
+                        // Check if response contains confirmation indicators
+                        bool confirmed = false;
+                        string confirmationMsg = "";
+                        
+                        if (!string.IsNullOrEmpty(response))
+                        {
+                            var responseUpper = response.ToUpperInvariant();
+                            var responseTrimmed = response.Trim();
+                            
+                            // Look for common success indicators in the response
+                            if (responseUpper.Contains("OK") || 
+                                responseUpper.Contains("SUCCESS") || 
+                                responseUpper.Contains("PRESET"))
+                            {
+                                confirmed = true;
+                                confirmationMsg = $"✓ ✓ ✓ SUCCESS: Home position confirmed set (preset {preset}) - Device confirmed: {responseTrimmed}";
+                            }
+                            else if (responseUpper.Contains("ERROR") || responseUpper.Contains("FAIL"))
+                            {
+                                // Device explicitly reported an error
+                                System.Diagnostics.Debug.WriteLine($"HiSilicon SetHome: Device returned error - {response}");
+                                StatusChanged?.Invoke(this, $"❌ Preset {preset} failed - Device error: {responseTrimmed}");
+                                continue; // Try next format
+                            }
+                            else if (responseTrimmed.Length > 0)
+                            {
+                                // HTTP 200 with response but unclear content - still consider it success
+                                confirmed = true;
+                                confirmationMsg = $"✓ Home position set (preset {preset}) - Device responded: {responseTrimmed}";
+                            }
+                            else
+                            {
+                                // HTTP 200 but empty response - still consider success
+                                confirmed = true;
+                                confirmationMsg = $"✓ Home position set (preset {preset}) - HTTP 200 OK (empty response)";
+                            }
+                        }
+                        else
+                        {
+                            // HTTP 200 but no response body - still consider success
+                            confirmed = true;
+                            confirmationMsg = $"✓ Home position set (preset {preset}) - HTTP 200 OK (no response body)";
+                        }
+                        
+                        if (confirmed)
+                        {
+                            StatusChanged?.Invoke(this, confirmationMsg);
+                            System.Diagnostics.Debug.WriteLine($"HiSilicon SetHome succeeded with: {action}&preset={preset}, Response: {response}");
+                            
+                            // Query and store current position for coordinate-based recall workaround
+                            // Since preset recall may not work, we'll store coordinates as fallback
+                            StatusChanged?.Invoke(this, "📐 Querying current camera position for coordinate-based recall...");
+                            var currentPosition = await HiSiliconGetPosition();
+                            if (currentPosition.HasValue)
+                            {
+                                _presetPositions[int.Parse(preset)] = currentPosition.Value;
+                                StatusChanged?.Invoke(this, $"💾 Stored preset {preset} position: Pan={currentPosition.Value.Pan:F2}, Tilt={currentPosition.Value.Tilt:F2}, Zoom={currentPosition.Value.Zoom:F2}");
+                                System.Diagnostics.Debug.WriteLine($"HiSilicon SetHome: Stored position for preset {preset}: {currentPosition.Value}");
+                            }
+                            else
+                            {
+                                StatusChanged?.Invoke(this, "⚠️ Could not query current position - coordinate-based recall may not be available");
+                                System.Diagnostics.Debug.WriteLine($"HiSilicon SetHome: Could not query position for preset {preset}");
+                            }
+                            
+                            return true;
+                        }
+                    }
+                    else
+                    {
+                        var errorMsg = $"❌ Preset {preset} failed: HTTP {statusCode}";
+                        if (!string.IsNullOrEmpty(errorMessage))
+                        {
+                            errorMsg += $" - {errorMessage}";
+                        }
+                        StatusChanged?.Invoke(this, errorMsg);
+                        System.Diagnostics.Debug.WriteLine($"HiSilicon SetHome failed for preset {preset}: Status={statusCode}, Error={errorMessage}");
+                    }
+                }
+                
+                StatusChanged?.Invoke(this, "❌ ❌ ❌ FAILED: Could not set home position - camera may not support presets or all command formats failed");
+                System.Diagnostics.Debug.WriteLine("HiSilicon SetHome: All preset formats failed");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                var errorMsg = $"❌ ❌ ❌ ERROR: SetHome exception - {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"HiSilicon SetHome error: {ex.Message}\n{ex.StackTrace}");
+                StatusChanged?.Invoke(this, errorMsg);
                 return false;
             }
         }
@@ -1252,6 +1911,34 @@ namespace PTZCameraOperator.Services
 </s:Envelope>";
         }
 
+        private string CreateSetPresetRequest(int presetNumber)
+        {
+            // ONVIF SetPreset request
+            return $@"<?xml version=""1.0"" encoding=""UTF-8""?>
+<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope"">
+    <s:Body>
+        <SetPreset xmlns=""http://www.onvif.org/ver20/ptz/wsdl"">
+            <ProfileToken>{_baseUrl}</ProfileToken>
+            <PresetToken>Preset{presetNumber}</PresetToken>
+        </SetPreset>
+    </s:Body>
+</s:Envelope>";
+        }
+        
+        private string CreateGoToPresetRequest(int presetNumber)
+        {
+            // ONVIF GotoPreset request
+            return $@"<?xml version=""1.0"" encoding=""UTF-8""?>
+<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope"">
+    <s:Body>
+        <GotoPreset xmlns=""http://www.onvif.org/ver20/ptz/wsdl"">
+            <ProfileToken>{_baseUrl}</ProfileToken>
+            <PresetToken>Preset{presetNumber}</PresetToken>
+        </GotoPreset>
+    </s:Body>
+</s:Envelope>";
+        }
+        
         private string CreateSetHomeRequest()
         {
             return $@"<?xml version=""1.0"" encoding=""UTF-8""?>
