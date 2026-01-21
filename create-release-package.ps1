@@ -35,14 +35,14 @@ if (Test-Path $portableZip) {
 
 Compress-Archive -Path "$releaseFolder\*" -DestinationPath $portableZip -Force
 $portableSize = [math]::Round((Get-Item $portableZip).Length / 1MB, 2)
-Write-Host "  ✓ Created: $portableZip ($portableSize MB)" -ForegroundColor Green
+Write-Host "  [OK] Created: $portableZip ($portableSize MB)" -ForegroundColor Green
 
 # Copy installer if it exists
 if ($hasInstaller) {
     $installerSize = [math]::Round((Get-Item $installerPath).Length / 1MB, 2)
     Write-Host ""
     Write-Host "Installer found: $installerPath ($installerSize MB)" -ForegroundColor Cyan
-    Write-Host "  ✓ Ready for upload: Installer\Output\PTZCameraOperatorSetup-1.0.0.exe" -ForegroundColor Green
+    Write-Host "  [OK] Ready for upload: Installer\Output\PTZCameraOperatorSetup-1.0.0.exe" -ForegroundColor Green
 } else {
     Write-Host ""
     Write-Host "WARNING: Installer not found: $installerPath" -ForegroundColor Yellow
