@@ -2,11 +2,11 @@
 ;Author: Robert Foster
 ;Version: 1.0.0
 
-#define MyAppName "PTZ Camera Control"
+#define MyAppName "PTZ Camera Operator"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Robert Foster"
 #define MyAppURL "https://github.com/devildog5x5/PTZ_Interface"
-#define MyAppExeName "PTZCameraControl.exe"
+#define MyAppExeName "PTZCameraOperator.exe"
 #define MyAppIcon "warrior_icon.ico"
 
 [Setup]
@@ -21,7 +21,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=.\Installer\Output
-OutputBaseFilename=PTZCameraControlSetup-{#MyAppVersion}
+OutputBaseFilename=PTZCameraOperatorSetup-{#MyAppVersion}
 SetupIconFile={#MyAppIcon}
 UninstallDisplayIcon={app}\{#MyAppIcon}
 Compression=lzma
@@ -39,7 +39,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "publish\win-x64\PTZCameraControl.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "publish\release\PTZCameraOperator.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "publish\release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "warrior_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -50,12 +51,12 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppIcon}"; Tasks: desktopicon
 
 [Run]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  MsgBox('PTZ Camera Control by Robert Foster' + #13#10 + 'Professional ONVIF PTZ Camera Controller', mbInformation, MB_OK);
+  MsgBox('PTZ Camera Operator by Robert Foster' + #13#10 + 'Professional ONVIF PTZ Camera Controller', mbInformation, MB_OK);
 end;
 
