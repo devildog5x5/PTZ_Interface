@@ -37,39 +37,62 @@ The application features a striking dark interface with:
 
 ## Download
 
-### 📥 Getting the Application
+### 📥 Quick Download Links
 
-**You have two options to get PTZ Camera Operator:**
+**Note:** Due to GitHub's 100MB file size limit, pre-built binaries are available via:
+- **GitHub Releases** (recommended) - Check the [Releases page](https://github.com/devildog5x5/PTZ_Interface/releases)
+- **Build from source** (see Option 3 below) - Takes ~2-3 minutes
 
-#### Option 1: Build from Source (Recommended)
-Build the application yourself - it's quick and ensures you have the latest version:
+#### Option 1: Installer Package (Recommended)
+**Download the Windows installer from GitHub Releases:**
 
-**Portable Build (No Installation):**
+📦 **Download:** [Latest Release](https://github.com/devildog5x5/PTZ_Interface/releases) → Download `PTZCameraOperatorSetup-1.0.0.exe` (~117 MB)
+
+**Features:**
+- ✅ Professional Windows installer
+- ✅ Automatic installation with desktop shortcut option
+- ✅ Uninstaller included
+- ✅ All dependencies bundled
+- ✅ Easy installation process
+
+**Installation:**
+1. Download `PTZCameraOperatorSetup-1.0.0.exe`
+2. Run the installer (admin rights may be required)
+3. Follow the installation wizard
+4. Launch from Start Menu or desktop shortcut
+
+#### Option 2: Portable Build (No Installation)
+**Download the ready-to-run portable application:**
+
+🔗 **Direct Download:** [publish/release folder](https://github.com/devildog5x5/PTZ_Interface/tree/2026-01-09-6cls/publish/release) (~145 MB)
+
+**To Download:**
+1. Navigate to the [publish/release folder](https://github.com/devildog5x5/PTZ_Interface/tree/2026-01-09-6cls/publish/release) on GitHub
+2. Click "Download" button (top right) or use the green "Code" button → "Download ZIP"
+3. Extract the files from the `publish/release` folder
+4. Run `PTZCameraOperator.exe` - no installation required!
+
+**What's included:**
+- ✅ Self-contained executable (includes .NET 8.0 runtime)
+- ✅ All dependencies including LibVLC
+- ✅ Ready to run - no installation needed
+- ✅ Portable - run from any folder
+
+#### Option 3: Build from Source
+If you prefer to build it yourself:
+
 ```bash
 git clone https://github.com/devildog5x5/PTZ_Interface.git
 cd PTZ_Interface
 cd PTZCameraOperator
 dotnet publish -c Release -r win-x64 --self-contained true -o ../publish/release
 ```
-The executable will be at: `publish/release/PTZCameraOperator.exe`
 
 **Create Installer (Optional):**
 1. Install [Inno Setup 6](https://jrsoftware.org/isinfo.php)
 2. Open `PTZCameraControlInstaller.iss` in Inno Setup Compiler
 3. Click "Build" → "Compile" or press F9
 4. The installer will be created in `Installer/Output/PTZCameraOperatorSetup-1.0.0.exe`
-
-#### Option 2: Download Pre-built Files
-**Note:** Pre-built binaries are not included in the repository due to size. You can:
-
-1. **Check GitHub Releases** - If available, download from the [Releases page](https://github.com/devildog5x5/PTZ_Interface/releases)
-2. **Build locally** - Follow Option 1 above (takes ~2-3 minutes)
-
-**What you'll get:**
-- ✅ Self-contained executable (includes .NET 8.0 runtime)
-- ✅ All dependencies including LibVLC (~145 MB total)
-- ✅ Ready to run - no installation needed for portable build
-- ✅ Professional installer available (optional, ~117 MB)
 
 ### Building from Source
 ```bash
