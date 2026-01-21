@@ -39,14 +39,14 @@ The application features a striking dark interface with:
 
 ### 📥 Quick Download Links
 
-**Note:** Due to GitHub's 100MB file size limit, pre-built binaries are available via:
-- **GitHub Releases** (recommended) - Check the [Releases page](https://github.com/devildog5x5/PTZ_Interface/releases)
-- **Build from source** (see Option 3 below) - Takes ~2-3 minutes
+**Note:** Due to GitHub's 100MB file size limit, pre-built binaries are available via GitHub Releases.
 
 #### Option 1: Installer Package (Recommended)
-**Download the Windows installer from GitHub Releases:**
+**Download the Windows installer:**
 
-📦 **Download:** [Latest Release](https://github.com/devildog5x5/PTZ_Interface/releases) → Download `PTZCameraOperatorSetup-1.0.0.exe` (~117 MB)
+🔗 **Direct Download:** [PTZCameraOperatorSetup-1.0.0.exe](https://github.com/devildog5x5/PTZ_Interface/releases/download/v1.0.0/PTZCameraOperatorSetup-1.0.0.exe) (~117 MB)
+
+📦 **Or visit:** [Latest Release](https://github.com/devildog5x5/PTZ_Interface/releases/latest) to see all available downloads
 
 **Features:**
 - ✅ Professional Windows installer
@@ -64,13 +64,14 @@ The application features a striking dark interface with:
 #### Option 2: Portable Build (No Installation)
 **Download the ready-to-run portable application:**
 
-🔗 **Direct Download:** [publish/release folder](https://github.com/devildog5x5/PTZ_Interface/tree/2026-01-09-6cls/publish/release) (~145 MB)
+🔗 **Direct Download:** [PTZCameraOperator-Portable-v1.0.0.zip](https://github.com/devildog5x5/PTZ_Interface/releases/download/v1.0.0/PTZCameraOperator-Portable-v1.0.0.zip) (~181 MB)
 
-**To Download:**
-1. Navigate to the [publish/release folder](https://github.com/devildog5x5/PTZ_Interface/tree/2026-01-09-6cls/publish/release) on GitHub
-2. Click "Download" button (top right) or use the green "Code" button → "Download ZIP"
-3. Extract the files from the `publish/release` folder
-4. Run `PTZCameraOperator.exe` - no installation required!
+📦 **Or visit:** [Latest Release](https://github.com/devildog5x5/PTZ_Interface/releases/latest) to see all available downloads
+
+**Installation:**
+1. Download `PTZCameraOperator-Portable-v1.0.0.zip`
+2. Extract the ZIP file to any folder
+3. Run `PTZCameraOperator.exe` - no installation required!
 
 **What's included:**
 - ✅ Self-contained executable (includes .NET 8.0 runtime)
