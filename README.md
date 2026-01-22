@@ -61,23 +61,23 @@ The application features a striking dark interface with:
 3. Follow the installation wizard
 4. Launch from Start Menu or desktop shortcut
 
-#### Option 2: Portable Build (No Installation)
-**Download the ready-to-run portable application:**
+#### Option 2: Standalone Executable (Portable - No Installation)
+**Download the standalone executable package:**
 
 🔗 **Direct Download:** [PTZCameraOperator-Portable-v1.0.0.zip](https://github.com/devildog5x5/PTZ_Interface/releases/download/v1.0.0/PTZCameraOperator-Portable-v1.0.0.zip) (~181 MB)
 
 📦 **Or visit:** [Latest Release](https://github.com/devildog5x5/PTZ_Interface/releases/latest) to see all available downloads
 
+**What's included:**
+- ✅ Standalone executable: `PTZCameraOperator.exe` (self-contained, includes .NET 8.0 runtime)
+- ✅ All dependencies including LibVLC
+- ✅ Ready to run - no installation needed
+- ✅ Portable - run from any folder
+
 **Installation:**
 1. Download `PTZCameraOperator-Portable-v1.0.0.zip`
 2. Extract the ZIP file to any folder
 3. Run `PTZCameraOperator.exe` - no installation required!
-
-**What's included:**
-- ✅ Self-contained executable (includes .NET 8.0 runtime)
-- ✅ All dependencies including LibVLC
-- ✅ Ready to run - no installation needed
-- ✅ Portable - run from any folder
 
 #### Option 3: Build from Source
 If you prefer to build it yourself:
