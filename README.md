@@ -2,6 +2,8 @@
 
 A professional PTZ Camera Controller with comprehensive support for ONVIF, HiSilicon, Hikvision, and Dahua cameras. Features live video streaming, multiple presets, and intelligent camera detection.
 
+> **Last Updated:** January 21, 2026
+
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)
 ![Windows](https://img.shields.io/badge/Platform-Windows-0078D6)
 ![License](https://img.shields.io/badge/License-MIT-green)
