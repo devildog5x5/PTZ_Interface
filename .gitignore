@@ -37,10 +37,10 @@ Desktop.ini
 !**/packages/build/
 
 # Installer output
-Installer/Output/
+# Installer/Output/  # Allow installer output for releases
 
 # LibVLC (large files)
-libvlc/
+# libvlc/  # Allow libvlc in publish folder for releases
 
 # User-specific files
 *.rsuser
@@ -51,6 +51,6 @@ msbuild.log
 msbuild.err
 msbuild.wrn
 
-
-publish/
-Installer/Output/
+# Build outputs (but allow release builds)
+# publish/  # Allow publish/release for distribution
+# Installer/Output/  # Allow installer output for distribution

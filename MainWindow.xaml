@@ -91,7 +91,13 @@ Dark Warrior Theme - Matching TestEnvironmentBuilder Style
                 <Border Grid.Column="2" Background="#21262d" CornerRadius="20" Padding="16,8">
                     <StackPanel Orientation="Horizontal">
                         <Ellipse x:Name="ConnectionIndicator" Width="10" Height="10" Fill="#f85149" Margin="0,0,10,0"/>
-                        <TextBlock x:Name="ConnectionLabel" Text="OFFLINE" Foreground="#8b949e" FontSize="13"/>
+                        <TextBox x:Name="ConnectionLabel" Text="OFFLINE" 
+                                 IsReadOnly="True"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="#8b949e" FontSize="13"
+                                 Cursor="IBeam"
+                                 MinWidth="70"/>
                     </StackPanel>
                 </Border>
             </Grid>
@@ -135,14 +141,14 @@ Dark Warrior Theme - Matching TestEnvironmentBuilder Style
                                    Foreground="{StaticResource TextSecondaryBrush}" 
                                    FontSize="11" Margin="0,0,0,5"/>
                         <TextBox x:Name="HostTextBox" Style="{StaticResource ModernTextBox}"
-                                 Text="192.168.1.100" Margin="0,0,0,12"/>
+                                 Text="192.168.1.12" Margin="0,0,0,12"/>
 
                         <!-- Port -->
                         <TextBlock Text="ONVIF Port" 
                                    Foreground="{StaticResource TextSecondaryBrush}" 
                                    FontSize="11" Margin="0,0,0,5"/>
                         <TextBox x:Name="PortTextBox" Style="{StaticResource ModernTextBox}"
-                                 Text="80" Margin="0,0,0,12"/>
+                                 Text="8080" Margin="0,0,0,12"/>
 
                         <!-- Username -->
                         <TextBlock Text="Username" 
@@ -162,15 +168,95 @@ Dark Warrior Theme - Matching TestEnvironmentBuilder Style
                         <Button x:Name="ConnectButton" Content="⚡ CONNECT" 
                                 Style="{StaticResource PrimaryButton}"
                                 Click="ConnectButton_Click"
-                                HorizontalAlignment="Stretch"/>
+                                HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
+
+                        <!-- Ping Button -->
+                        <Button x:Name="PingButton" Content="🔍 PING" 
+                                Style="{StaticResource ModernButton}"
+                                Click="PingButton_Click"
+                                HorizontalAlignment="Stretch" Margin="0,0,0,8"/>
+
+                        <!-- Discovery Section -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="DiscoveryButton" Content="🔎 DISCOVER" 
+                                    Style="{StaticResource ModernButton}"
+                                    Click="DiscoveryButton_Click"
+                                    HorizontalAlignment="Stretch"/>
+                            <Button x:Name="StopDiscoveryButton" Grid.Column="2" Content="⬛" 
+                                    Style="{StaticResource ModernButton}"
+                                    Click="StopDiscoveryButton_Click" 
+                                    Width="45" IsEnabled="False"/>
+                        </Grid>
+
+                        <!-- Discovered Cameras List -->
+                        <TextBlock Text="Discovered Cameras" 
+                                   Foreground="{StaticResource TextSecondaryBrush}" 
+                                   FontSize="11" Margin="0,0,0,5"/>
+                        <Border Background="{StaticResource BgInputBrush}"
+                                BorderBrush="{StaticResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                MaxHeight="120" Margin="0,0,0,12">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" 
+                                        HorizontalScrollBarVisibility="Disabled">
+                                <ListBox x:Name="DiscoveredCamerasListBox" 
+                                         Background="Transparent"
+                                         Foreground="{StaticResource TextPrimaryBrush}"
+                                         BorderThickness="0"
+                                         Padding="5,5"
+                                         FontSize="13"
+                                         SelectionMode="Single"
+                                         SelectionChanged="DiscoveredCamerasListBox_SelectionChanged"
+                                         MouseDoubleClick="DiscoveredCamerasListBox_MouseDoubleClick">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" 
+                                                       Padding="8,4"
+                                                       TextWrapping="Wrap"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Padding" Value="0"/>
+                                            <Setter Property="Margin" Value="2,1"/>
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Cursor" Value="Hand"/>
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource BackgroundMediumBrush}"/>
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource AccentGoldBrush}"/>
+                                                    <Setter Property="Foreground" Value="#0d1117"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                </ListBox>
+                            </ScrollViewer>
+                        </Border>
+                        <TextBlock Text="Double-click to connect" 
+                                   Foreground="{StaticResource TextMutedBrush}" 
+                                   FontSize="9" Margin="0,-10,0,12" HorizontalAlignment="Center"/>
 
                         <!-- Status Display -->
                         <Border Background="{StaticResource BackgroundMediumBrush}" 
                                 CornerRadius="8" Padding="12,10" Margin="0,15,0,0"
                                 BorderBrush="{StaticResource BorderDarkBrush}" BorderThickness="1">
-                            <TextBlock x:Name="StatusText" Text="Ready to connect..." 
-                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                       FontSize="11" TextWrapping="Wrap"/>
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="150">
+                                <TextBox x:Name="StatusText" Text="Ready to connect..." 
+                                         IsReadOnly="True"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="{StaticResource TextSecondaryBrush}"
+                                         FontSize="11" TextWrapping="Wrap"
+                                         Cursor="IBeam"/>
+                            </ScrollViewer>
                         </Border>
 
                         <!-- Stream Section Header -->
@@ -495,10 +581,15 @@ Dark Warrior Theme - Matching TestEnvironmentBuilder Style
                                 <TextBlock Text="CURRENT POSITION" FontSize="10" FontWeight="Bold"
                                            Foreground="{StaticResource TextMutedBrush}"
                                            HorizontalAlignment="Center" Margin="0,0,0,5"/>
-                                <TextBlock x:Name="PositionText" Text="P:-- T:-- Z:--" 
-                                           Foreground="{StaticResource NeonCyanBrush}"
-                                           FontFamily="Consolas" FontSize="13" FontWeight="Bold"
-                                           HorizontalAlignment="Center"/>
+                                <TextBox x:Name="PositionText" Text="P:-- T:-- Z:--" 
+                                         IsReadOnly="True"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Foreground="{StaticResource NeonCyanBrush}"
+                                         FontFamily="Consolas" FontSize="13" FontWeight="Bold"
+                                         HorizontalContentAlignment="Center"
+                                         TextAlignment="Center"
+                                         Cursor="IBeam"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
