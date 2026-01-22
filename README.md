@@ -2,8 +2,6 @@
 
 A professional PTZ Camera Controller with comprehensive support for ONVIF, HiSilicon, Hikvision, and Dahua cameras. Features live video streaming, multiple presets, and intelligent camera detection.
 
-> **Last Updated:** January 21, 2026
-
 ![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4)
 ![Windows](https://img.shields.io/badge/Platform-Windows-0078D6)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -41,7 +39,9 @@ The application features a striking dark interface with:
 
 ### 📥 Quick Download Links
 
-**Note:** Due to GitHub's 100MB file size limit, pre-built binaries are available via GitHub Releases.
+**Download the latest release:** Pre-built binaries are available via GitHub Releases (files exceed 100MB limit).
+
+**Direct Download Links:**
 
 #### Option 1: Installer Package (Recommended)
 **Download the Windows installer:**
